@@ -1,0 +1,265 @@
+# Progress Log — AI Payments Intelligence Platform
+
+Stand: 25. August 2026
+Umgebung: Windows, Docker Desktop, n8n 2.35.7 lokal auf localhost:5678
+
+---
+
+## Aktueller Systemaufbau
+
+```
+On form submission (topic, timeframe)
+  |
+  +-- Build Search Query -- Tavily Search -- Normalize Tavily ---+
+  |                                                              |
+  +-- Feed List -- Fetch Feeds -- Parse XML -- Normalize Feed ---+
+                                                                 |
+                                                    Combine Sources (append)
+                                                                 |
+                                                    Triage Relevance (Haiku 4.5)
+                                                                 |
+                                                    Clean and Rank Sources
+                                                                 |
+                                                    Extract Metadata (Haiku 4.5)
+                                                                 |
+                                                    Analyse and Draft Brief (Sonnet 5)
+                                                                 |
+                                                    Assemble Brief
+```
+
+13 Nodes, 3 Modellaufrufe, 2 Quellenkanaele, 4 Filterstufen.
+Kosten ca. $0.05 pro Brief.
+
+---
+
+## 2026-08-25 — Phase 1 abgeschlossen
+
+Workflow: Form -> Build Search Query -> Tavily -> Clean and Rank -> Claude Sonnet 5 -> Assemble Brief
+
+- 6 Nodes, ca. $0.04 pro Brief
+- Tavily: search_depth basic (1 Credit), max_results 8, Content auf 1200 Zeichen gekuerzt
+- Quellen-Tiering: 1 = Regulierer, 2 = Unternehmen, 3 = serioese Medien, 4 = unbekannt
+- Ranking ueberschreibt bewusst den Tavily-Score: Quellenqualitaet vor Suchrelevanz
+
+### Tests
+- Test 1 "Adyen": 8 Quellen, alle Abschnitte, durchgehend zitiert -> OK
+- Test 2 "Agentic Payments": erkannte zwei konkurrierende Infrastrukturmodelle
+  (kartennetzvermittelt vs. blockchain/stablecoin-nativ) -> OK
+- Test 3 "Zyloric Payments Consortium" (erfunden): INSUFFICIENT EVIDENCE -> OK
+  Wichtigster Test. Das Modell hatte 8 plausibel wirkende Payments-Quellen vor sich
+  und haette daraus etwas zusammenbauen koennen. Stattdessen:
+  "None can be repurposed to support claims about the requested topic."
+
+### Gefundene Bugs
+- `new URL()` ist in der n8n-Code-Sandbox nicht verfuegbar
+  -> Domain per Regex extrahieren: `/^https?:\/\/([^\/?#:]+)/i`
+- Max Tokens 3000 zu knapp, Brief brach mitten im Satz ab -> auf 4000 erhoeht
+- TIER_3-Liste zu schmal, Forbes und Payments-Fachpresse fielen auf Tier 4 -> erweitert
+
+---
+
+## 2026-08-25 — Phase 2 abgeschlossen
+
+### Boilerplate-Filter, zwei Stufen
+1. Phrasenmuster (registered office, copyright resides, ...)
+2. Satzdichte: >40 Woerter UND >60 Woerter pro Satz = Navigationsliste, kein Fliesstext
+
+Anlass: Die Stripe-Newsroom-Seite lieferte ein reines Navigationsmenue
+("Solutions Enterprises Startups Agentic commerce Crypto Ecommerce ...") ohne
+eine einzige der typischen Boilerplate-Phrasen. Nur der Strukturtest erkennt das.
+
+### RSS-Zweig
+- ECB Press + ECB Blog (verifiziert auf ecb.europa.eu/home/html/rss.en.html)
+- Feed List (Code) -> HTTP Request -> XML -> Normalize (Keyword-Vorfilter)
+- HTTP Request laeuft automatisch einmal pro Item aus der Feed-Liste
+- Response Format muss auf "Text" stehen, sonst versucht n8n XML als JSON zu lesen
+- Merge-Node im Modus "append" fuehrt Tavily + RSS zusammen
+
+### Themenfilter fuer RSS
+RSS liefert ALLES, was ein Feed publiziert. Filter prueft, ob ein Themenwort
+in Titel oder Text vorkommt.
+-> "Adyen" verwirft EZB-Meldungen korrekt, "digital euro" behaelt sie
+
+### Headline-Only-Problem
+Der ECB-Feed liefert kein description-Feld, nur Titel/Link/Datum.
+Loesung: Kennzeichnung [HEADLINE ONLY] im Evidenzblock + Prompt-Regel 8:
+Das Modell darf ueber die Ueberschrift hinaus nichts behaupten.
+Funktioniert — der Brief schreibt seitdem selbst dazu:
+"per a headline-only release" / "content not retrieved beyond the headline".
+
+### Ergebnis
+Erstmals tier1_count > 0: Test "digital euro" mit 2 EZB-Primaerquellen.
+
+---
+
+## 2026-08-25 — Phase 3 abgeschlossen (strukturierte Ausgabe)
+
+Zweiter LLM-Zweig extrahiert parallel zum Fliesstext-Brief ein JSON-Objekt.
+
+- Modellwahl bewusst getrennt:
+  Sonnet 5 fuer die Analyse (Reasoning ueber mehrere Quellen)
+  Haiku 4.5 fuer die Extraktion (simple Aufgabe, halber Preis)
+- Structured Output Parser mit "Generate From JSON Example"
+- Festes Vokabular fuer category und relevance-Felder, sonst erfindet das Modell
+  bei jedem Lauf neue Kategorien ("regulation" / "regulatory" / "reg")
+  -> in einer Datenbank unbrauchbar
+
+### Scoring
+- impact_score 0-100 mit definierten Stufen
+- confidence_score 0-100, gedeckelt:
+  Headline-Only-Quellen -> max 60
+  weniger als 3 Quellen -> max 40
+
+### Architektur-Lernpunkt: Reihenfolge in n8n
+
+Erster Versuch: zwei parallele Zweige aus Clean and Rank Sources,
+beide muenden in Assemble Brief.
+
+Problem 1: Assemble Brief lief zweimal (einmal pro eingehender Verbindung).
+  "Execute Once" loest das NICHT — das begrenzt Items pro Ausfuehrung,
+  nicht die Anzahl der Ausfuehrungen.
+
+Problem 2: Verbindung getrennt und stattdessen $('Extract Metadata') verwendet
+  -> ExpressionError "Node hasn't been executed".
+  $('Node Name') funktioniert nur fuer Nodes, die VORHER in der Kette liefen.
+  Die Verkabelung bestimmt die Ausfuehrungsreihenfolge, nicht nur den Datenfluss.
+
+Loesung: Nodes in Reihe statt parallel.
+Analyse-Prompt greift seitdem explizit ueber
+`$('Clean and Rank Sources').first().json.evidence` zu, nicht ueber $json.
+
+Regel fuer kuenftige Workflows:
+  $json  = Ausgabe des unmittelbar vorhergehenden Nodes
+  $('X') = Ausgabe eines beliebigen Nodes, der vorher gelaufen ist
+Bei verzweigten Workflows immer die zweite Variante.
+
+### Qualitaetsbefund: Extraktion ist zu grosszuegig
+Test "digital euro" lieferte in primary_companies:
+European Central Bank, PagBrasil, Marqeta, Banking Circle, Highnote, Nuvei, Nium.
+Nur die EZB gehoert dort hin.
+
+Ursache: Sonnet ignoriert irrelevante Quellen und zitiert sie nicht.
+Haiku bei reiner Extraktion tut das nicht — es extrahiert alles, was dasteht.
+
+Muster: Extraktionsmodelle sind zu grosszuegig, Analysemodelle zu wortreich.
+Beide brauchen enge Anweisungen, aber unterschiedliche.
+
+Fix: primary_companies nur zentrale Akteure der im TOPIC beschriebenen
+Entwicklung, keine beilaeufig erwaehnten Firmen, lieber 1-5 Eintraege.
+Analog fuer affected_segments: nur Segmente mit konkretem Effekt.
+
+Relevanz: In Phase 7 wuerde ein Klick auf "Marqeta" sonst einen
+Digital-Euro-Artikel zeigen, in dem Marqeta nicht vorkommt.
+
+---
+
+## 2026-08-25 — Sicherheitsbefund: extremistische Inhalte in der Evidenz
+
+Test "digital euro" lieferte instagram.com als [S9]. Der Tavily-Snippet enthielt
+neben dem eigentlichen Post auch Nutzerkommentare mit antisemitischer Codierung
+(dreifache Klammern um Firmennamen, "Trust us goyim").
+
+Ursache: instagram.com fehlte in excludeDomains, und es gab keine zweite Ebene.
+
+Fix, zweistufig:
+1. excludeDomains erweitert (alle grossen Social-Plattformen + Syndikationsportale
+   aol.com, msn.com, die Agenturmeldungen unveraendert uebernehmen)
+2. Harte NEVER_USE-Sperre im eigenen Code
+
+Prinzip: Suchmaschinen-Parameter sind Wuensche, keine Garantien.
+Eine Sperre im eigenen Code kann niemand umgehen. Defence in depth.
+
+Merke: Aggregator-Snippets enthalten Kommentarspalten. Bei jeder Quelle,
+die nutzergenerierte Inhalte fuehrt, ist der Snippet unkontrollierbar.
+
+---
+
+## 2026-08-25 — Triage-Schritt (Haiku) eingefuehrt
+
+Problem: Regelbasierte Filter erkennen Format, aber nicht Themenbezug.
+coredo.eu war ein sauber geschriebener Marketingtext ueber Internet Acquiring —
+strukturell einwandfrei, inhaltlich am Thema vorbei. Kein Regex erkennt das.
+
+Zwischenversuch mit URL-Mustern ging schief: `/news` in der Sperrliste traf
+auch legitime Artikel-URLs, sourceCount fiel von 9 auf 2.
+-> URL-Struktur sagt nichts ueber Themenrelevanz aus.
+
+Loesung: Basic LLM Chain mit Haiku 4.5 zwischen Merge und Aufbereitung.
+Bewertet jede Quelle 0-100 auf Themenbezug.
+
+Wichtig: "Execute Once" noetig, sonst laeuft der Node einmal pro Item
+(10 Aufrufe statt 1). Der Prompt sammelt ueber $input.all() selbst alle Quellen.
+
+Ergebnis Test "digital euro": 11 Quellen -> 8 aussortiert, 3-4 relevante uebrig.
+droppedCount der Formatfilter faellt auf 0 — der Muell ist vorher schon weg.
+
+Beispiel-Scores:
+  90 = EZB digital euro app
+  85 = centralbanking.com Gesetzgebung
+  75 = Yahoo digitaler Euro
+  25 = EZB Bargeldmeldung ("tangentially related")
+  5-15 = Marketingtexte und Index-Seiten
+
+Schwelle zuerst auf 40, dann auf 25 gesenkt, damit tangential relevante
+Tier-1-Quellen als Kontext erhalten bleiben.
+
+Erkenntnis: Regeln fuer Format und Duplikate, Modell fuer Inhalt.
+
+### Retry On Fail
+Nach Einfuehrung des dritten Anthropic-Aufrufs trat ein Connection Error auf.
+Alle API-Nodes (3x Anthropic, 1x Tavily) auf Retry On Fail gesetzt:
+Max Tries 3, Wait Between Tries 2000 ms.
+Im naechsten Lauf schlug ein Aufruf fehl und lief im zweiten Versuch durch —
+der Workflow brach nicht ab.
+
+---
+
+## 2026-08-25 — Beobachtung: Triage senkt die Confidence, und das ist richtig
+
+Vor Triage: 10 Quellen, davon 2 Headline-Only (20 %) -> confidence 55
+Nach Triage:  4 Quellen, davon 2 Headline-Only (50 %) -> confidence 48
+
+Das Aussortieren von Rauschen erhoeht den ANTEIL duenner Quellen.
+Das Modell rechnet korrekt damit:
+"Two of four sources provide headline-only content with no article body;
+the two substantive sources are lower-tier and describe draft legislation."
+
+Vier relevante Quellen sind besser als zehn gemischte, aber die Faktenbasis
+ist schmaler, wenn die Haelfte davon nur Ueberschriften sind.
+
+-> Naechste echte Baustelle ist Volltext-Extraktion fuer RSS-Links,
+   nicht weitere Filterung.
+
+---
+
+## Kosten (Stand 25.08.2026)
+
+- Anthropic: ca. $0.20 verbraucht, Guthaben $5, Monatslimit $5
+- Tavily: unter 15 von 1500 Credits
+- Zwei unabhaengige Schutzschichten: Guthaben (physische Grenze) und
+  Monatslimit (greift auch bei Auto-Reload)
+- Auto-Reload bewusst NICHT aktiviert
+
+---
+
+## Offene Punkte
+
+1. Volltext-Extraktion fuer RSS-Links (hoechste Prioritaet)
+   Die beiden autoritativsten Quellen liegen nur als Ueberschrift vor.
+2. Weitere Feeds: EBA, EU-Kommission, Unternehmens-Newsrooms
+3. droppedCount zaehlt bei Tavily nicht ganz korrekt (kosmetisch)
+4. Tavily "Pay as you go" steht auf AN — vor Phase 5 abschalten,
+   damit ein fehlerhafter Scheduler nicht unbegrenzt abrechnet
+
+---
+
+## Naechste Phasen
+
+- Phase 2.4: Volltext-Extraktion RSS
+- Phase 4: Speicherung (Google Sheets, spaeter Supabase), Dedup ueber content_hash
+- Phase 5: Scheduler, taegliches Monitoring einer Watchlist
+- Phase 6: Wochenreport als HTML/E-Mail/PDF
+- Phase 7: Oeffentliche Website (Next.js auf Vercel)
+- Phase 8: Merchant Payment Performance Analyzer (synthetische Daten)
+- Phase 9: GitHub public, README, Architekturdiagramm
+- Phase 10: Nutzer und ehrliche Metriken

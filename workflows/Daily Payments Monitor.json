@@ -1,0 +1,209 @@
+{
+  "name": "Daily Payments Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "daysInterval": 2,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a6f29051-809b-40b5-b919-9985ed1eb92d",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Themenliste fuer das taegliche Monitoring.\n// Jeder Eintrag wird ein eigenes Item -> die Schleife laeuft einmal pro Thema.\n\nconst MAX_PER_RUN = 5;        // HARTE KOSTENBREMSE: max. Themen pro Lauf\nconst TIMEFRAME = 'month';     // taeglich laufen, Wochenfenster gegen Luecken\n\nconst watchlist = [\n  { topic: 'Adyen',             kind: 'company' },\n  { topic: 'Stripe',            kind: 'company' },\n  { topic: 'Visa',              kind: 'company' },\n  { topic: 'digital euro',      kind: 'topic'   },\n  { topic: 'agentic payments',  kind: 'topic'   }\n];\n\nconst selected = watchlist.slice(0, MAX_PER_RUN);\n\nreturn selected.map((w, i) => ({\n  json: {\n    topic: w.topic,\n    kind: w.kind,\n    timeframe: TIMEFRAME,\n    position: i + 1,\n    total: selected.length,\n    runId: new Date().toISOString()\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "5784e549-3855-4fbd-a1b1-deec4bcb21bb",
+      "name": "Watchlist"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "fda45bd9-2a26-4d3d-b6c3-893c35bb7c28",
+      "name": "Process Each Topic"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "fvSuzcLpjHpyTy5l",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/fvSuzcLpjHpyTy5l",
+          "cachedResultName": "Payments Intelligence - On-Demand Brief"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "topic": "={{ $json.topic }}",
+            "timeframe": "={{ $json.timeframe }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "topic",
+              "displayName": "topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "timeframe",
+              "displayName": "timeframe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        208
+      ],
+      "id": "09f4b667-bfaa-4145-88a8-76b4599fcc55",
+      "name": "Run Brief Workflow",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        208
+      ],
+      "id": "9c86db2a-874d-4674-b2ed-80e01c68f7dd",
+      "name": "Pause",
+      "webhookId": "2d20a13c-fbd9-4d0b-bd74-d74fb7b4b562"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Zusammenfassung des Monitoring-Laufs.\n\nconst results = $input.all().map(i => i.json || {});\n\nconst total = results.length;\nconst newBriefs = results.filter(r => r.was_new === true);\nconst skipped = results.filter(r => r.skipped === true);\nconst duplicates = results.filter(r => r.was_new === false && r.skipped !== true);\nconst failed = results.filter(r => !r.content_hash && r.skipped !== true);\n\nconst sourcesWritten = results.reduce((s, r) => s + (r.sources_written || 0), 0);\nconst sourcesSeen = results.reduce((s, r) => s + (r.source_count || 0), 0);\n\n// Nach Impact sortiert, damit das Wichtigste oben steht\nconst ranked = newBriefs\n  .filter(r => typeof r.impact_score === 'number')\n  .sort((a, b) => b.impact_score - a.impact_score);\n\nconst lines = ranked.map(r =>\n  `  [${r.impact_score}/${r.confidence_score}] ${r.topic}: ${r.headline || '(kein Headline)'}`\n);\n\nconst summary = [\n  `Payments Monitor — ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,\n  ``,\n  `Themen verarbeitet: ${total}`,\n  `Neue Briefs:        ${newBriefs.length}`,\n  `Duplikate:          ${duplicates.length}`,\n  `Zu schwach:         ${skipped.length}`,\n  `Fehlgeschlagen:     ${failed.length}`,\n  `Quellen gesichtet:  ${sourcesSeen}`,\n  `Quellen gespeichert:${sourcesWritten}`,\n  ``,\n  newBriefs.length ? `Neue Entwicklungen (impact/confidence):` : `Keine neuen Entwicklungen.`,\n  ...lines,\n  ``,\n  failed.length ? `Fehlgeschlagene Themen: ${failed.map(f => f.topic || '?').join(', ')}` : ''\n].filter(Boolean).join('\\n');\n\nreturn [{\n  json: {\n    run_finished_at: new Date().toISOString(),\n    topics_processed: total,\n    new_briefs: newBriefs.length,\n    duplicates: duplicates.length,\n    skipped: skipped.length,\n    failed: failed.length,\n    sources_seen: sourcesSeen,\n    sources_written: sourcesWritten,\n    estimated_cost_usd: Number((total * 0.05).toFixed(2)),\n    summary_text: summary,\n    results\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "b9d04075-6fff-4d51-8ac1-92773760d00f",
+      "name": "Run Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Watchlist": {
+      "main": [
+        [
+          {
+            "node": "Process Each Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Each Topic": {
+      "main": [
+        [
+          {
+            "node": "Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Brief Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Brief Workflow": {
+      "main": [
+        [
+          {
+            "node": "Pause",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pause": {
+      "main": [
+        [
+          {
+            "node": "Process Each Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "16d838eb-5666-4fb9-94a7-1ed5319d4dda",
+  "meta": {
+    "instanceId": "4f91a6f1612cf913a0a2664e2023278f85a262b5bd0c8e42a10a3a601eeee494"
+  },
+  "nodeGroups": [],
+  "id": "AOAmCzFpyBD31v6X",
+  "tags": []
+}
