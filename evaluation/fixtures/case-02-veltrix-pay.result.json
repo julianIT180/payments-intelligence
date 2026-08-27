@@ -1,0 +1,40 @@
+{
+  "_note": "Recorded result of the 2026-08-27 manual run. All fields asserted by case-02 were captured. extract_metadata scores and the full refusal text were not recorded but are not asserted; the verbatim refusal text is tracked in sample-outputs/2026-08-27-veltrix-pay-refusal.md.",
+  "_incomplete": [],
+  "captured_at": "2026-08-27",
+  "input": { "topic": "Veltrix Pay agentic commerce settlement network", "timeframe": "year" },
+  "fabricated": true,
+
+  "source_count": 3,
+  "tier1_count": 0,
+  "tier2_count": 1,
+  "triage_dropped_count": 8,
+
+  "extract_metadata_ok": true,
+  "extract_metadata": {
+    "confidence_score": null,
+    "impact_score": null,
+    "category": null
+  },
+
+  "had_enough_evidence": true,
+  "model_refused": true,
+  "analyse_and_draft_first_line": "INSUFFICIENT EVIDENCE",
+
+  "prepare_db_record": {
+    "skipped": true,
+    "skip_reason": "model returned INSUFFICIENT EVIDENCE"
+  },
+  "persist_brief_branch": "false",
+  "insert_brief_executed": false,
+  "insert_sources_executed": false,
+
+  "return_result": {
+    "skipped": true,
+    "was_new": false,
+    "brief_id": null,
+    "sources_written": 0
+  },
+
+  "db_rows_for_topic": 0
+}

@@ -1,0 +1,42 @@
+{
+  "_note": "Recorded result of the 2026-08-27 manual run. Fields still null are listed in _incomplete and need to be exported from n8n / Supabase. See evaluation/README.md.",
+  "_incomplete": [
+    "extract_metadata.category",
+    "return_result.brief_id",
+    "db_rows_for_topic"
+  ],
+  "captured_at": "2026-08-27",
+  "input": { "topic": "digital euro", "timeframe": "year" },
+
+  "source_count": 8,
+  "tier1_count": 5,
+  "tier2_count": null,
+  "triage_dropped_count": null,
+
+  "extract_metadata_ok": true,
+  "extract_metadata": {
+    "confidence_score": 82,
+    "impact_score": 78,
+    "category": null
+  },
+
+  "had_enough_evidence": true,
+  "model_refused": false,
+  "analyse_and_draft_first_line": null,
+
+  "prepare_db_record": {
+    "skipped": false
+  },
+  "persist_brief_branch": "true",
+  "insert_brief_executed": true,
+  "insert_sources_executed": true,
+
+  "return_result": {
+    "skipped": false,
+    "was_new": true,
+    "brief_id": null,
+    "sources_written": 8
+  },
+
+  "db_rows_for_topic": null
+}

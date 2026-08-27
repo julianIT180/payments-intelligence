@@ -1,0 +1,24 @@
+{
+  "id": "case-02-veltrix-pay",
+  "title": "Fabricated subject is refused despite surviving sources",
+  "kind": "adversarial",
+  "fabricated": true,
+  "fabrication_note": "\"Veltrix Pay\" is an invented company/product with no real-world referent. It exists only for this test. The surrounding terms (agentic commerce, settlement network) are real, so the search returns genuine payments articles that are topic-adjacent but not about the fabricated entity.",
+  "input": { "topic": "Veltrix Pay agentic commerce settlement network", "timeframe": "year" },
+  "objective": "A plausible-sounding but invented subject must not produce a brief, even when retrieval returns enough topic-adjacent material to clear the numeric source-count threshold.",
+  "why_it_matters": "A refusal on a topic that returns no sources is trivial. Here eight candidates were dropped at triage but three plausible sources survived - enough to satisfy had_enough_evidence and source_count >= 3 - and the model still recognised that none substantiate the fabricated company, returning INSUFFICIENT EVIDENCE rather than assembling a brief around adjacent material. This is the failure mode that separates a grounded system from a summariser.",
+  "expect": [
+    { "field": "extract_metadata_ok", "op": "truthy" },
+    { "field": "source_count", "op": "gte", "value": 3 },
+    { "field": "had_enough_evidence", "op": "eq", "value": true },
+    { "field": "analyse_and_draft_first_line", "op": "startsWith", "value": "INSUFFICIENT EVIDENCE" },
+    { "field": "model_refused", "op": "eq", "value": true },
+    { "field": "prepare_db_record.skipped", "op": "eq", "value": true },
+    { "field": "prepare_db_record.skip_reason", "op": "eq", "value": "model returned INSUFFICIENT EVIDENCE" },
+    { "field": "persist_brief_branch", "op": "eq", "value": "false" },
+    { "field": "insert_brief_executed", "op": "eq", "value": false },
+    { "field": "insert_sources_executed", "op": "eq", "value": false },
+    { "field": "return_result.sources_written", "op": "eq", "value": 0 },
+    { "field": "db_rows_for_topic", "op": "eq", "value": 0 }
+  ]
+}

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+
+      - name: Build
+        working-directory: web
+        # No real Supabase project in CI. Placeholder env keeps createClient() from
+        # throwing; the pages fall back to their error state during static generation.
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-secret
+        run: npm run build
+
+      - name: Validate workflow JSON
+        run: |
+          for f in workflows/*.json; do
+            node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$f" \
+              && echo "ok   $f" || { echo "FAIL $f"; exit 1; }
+          done
+
+      - name: Evaluation harness (static, no external APIs)
+        run: node evaluation/validate.mjs
+
+      - name: Secret pattern scan (tracked files)
+        run: |
+          set -euo pipefail
+          pattern='sk-ant-api[0-9]|sb_secret_[A-Za-z0-9]|tvly-[A-Za-z0-9]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+|postgres(ql)?://[^[:space:]\"'"'"']*:[^[:space:]\"'"'"']*@'
+          if git grep -nIE "$pattern" -- . ':(exclude)web/package-lock.json'; then
+            echo "::error::possible secret pattern found in tracked files"
+            exit 1
+          fi
+          echo "no secret patterns found"

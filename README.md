@@ -25,10 +25,21 @@ At a glance:
   fill gaps; a separate publication gate then stores a brief only when it is not a
   refusal, has ≥ 3 ranked sources and clears a confidence threshold. Skipped runs never
   touch the database.
+- **Read through a live site.** A Next.js frontend on Vercel
+  ([payments-intelligence.vercel.app](https://payments-intelligence.vercel.app/)) reads
+  the same database, server-rendered, no write path: a feed ranked by impact, per-brief
+  source lists with tiers, a company view, the weekly report archive, and an About page
+  that states the method and the limitations.
 - **Validated by hand.** Two live cases are recorded in
   [`docs/evaluation.md`](docs/evaluation.md) — one well-evidenced topic that publishes,
   one fabricated company that is refused *despite* three topic-adjacent sources
   surviving the filters.
+
+<!-- Screenshots — add the three PNGs to docs/img/ and uncomment (see docs/img/README.md):
+![Intelligence feed ranked by impact](docs/img/feed.png)
+![Digital euro brief with tiered source list](docs/img/brief-digital-euro.png)
+![About page — method and stated limitations](docs/img/about-limitations.png)
+-->
 
 ---
 
@@ -231,7 +242,13 @@ and under 60 % uppercase words — moved confidence from **48 to 72** and impact
   are internally consistent and useful for ranking. They are not validated predictions.
 - **English-language sources dominate.** The tier lists are Europe- and US-weighted.
 - **No human review.** Nothing between the model and the published page.
-- **Small evidence base per brief.** The gate requires two sources, not ten.
+- **Small evidence base per brief.** The gate requires three sources, not ten.
+- **The on-demand form trigger has no authentication.** Safe only while n8n runs
+  locally; it must be secured or removed before the instance is hosted. No credential
+  or endpoint is exposed by this repository.
+- **Short operating history.** The database holds a small number of briefs from a
+  short window, so any aggregate figure is a small sample. Metrics belong on a live
+  page, not frozen in this README (see Roadmap).
 
 The live site states the same limitations on its `/about` page.
 
@@ -245,17 +262,22 @@ The live site states the same limitations on its `/about` page.
 
 Two-thirds of the pipeline's LLM calls run on Haiku. A monthly cap and a warning threshold
 are set on the Anthropic account, and auto-reload is deliberately off — a runaway loop
-should fail, not bill.
+should fail, not bill. Tavily pay-as-you-go is left enabled at the current low volume;
+the decision of record is to disable it before raising volume, frequency or search depth.
 
 ## Repository layout
 
 ```
-db/          schema and metric queries
-docs/        architecture diagrams, development log
-sample-outputs/  placeholder; samples will be regenerated from the live workflow
-screenshots/  one screenshot of the on-demand brief workflow
-web/         Next.js frontend (App Router, Tailwind), deployed on Vercel
-workflows/   the three n8n workflows as exported JSON
+db/              schema and metric queries
+docs/            architecture diagrams, development log, evaluation, readiness checklist
+docs/img/        README screenshots (see docs/img/README.md)
+evaluation/      case definitions, result fixtures, and validate.mjs
+pipeline/        readable reference copies of the workflow's Code-node logic
+sample-outputs/  real runs, kept unedited (verbatim brief / refusal text pending paste)
+screenshots/     one screenshot of the on-demand brief workflow
+web/             Next.js frontend (App Router, Tailwind), deployed on Vercel
+workflows/       the three n8n workflows as exported JSON
+.github/         CI (build, lint, workflow-JSON parse, evaluation, secret scan)
 ```
 
 ## Running it yourself

@@ -25,14 +25,16 @@
 
 ---
 
-## TODO — verbatim artifact to add
+## TODO — paste the verbatim brief here
 
-Paste, unedited, from **one** of these authoritative sources:
-
+Source (pick one, do not edit):
 - Supabase → `select brief_markdown from briefs where id = '<brief_id>';`
-  (the `<brief_id>` from the run's `Return Result` output), **or**
-- the n8n execution → `Assemble Brief` node output → `brief_markdown`.
+  (`<brief_id>` from the run's `Return Result` output), or
+- n8n execution → `Assemble Brief` node output → `brief_markdown`.
 
-Add it verbatim below this line as fenced text, followed by the source list from
-`brief_sources` (or the `## Sources` section already inside `brief_markdown`).
-Also fill `tier2_count` above. Do not edit the prose.
+The `brief_markdown` already contains its own `## Sources` section, so pasting it
+whole is enough. Also fill `tier2_count` in the table above from the run.
+
+```text
+<paste brief_markdown here, unedited>
+```

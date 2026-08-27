@@ -315,3 +315,14 @@ and the resulting error (`permission denied for table briefs`) points at the wro
 | `/companies` | Grouped by company, sorted by frequency |
 | `/reports` | Weekly reports, newest first |
 | `/about` | Method in six steps, score definitions, stated limitations |
+
+Briefs are rendered from stored Markdown by a small in-repo renderer, so no raw HTML
+is involved. The **weekly report** is the exception: `weekly_reports.report_html` is
+HTML produced by the report workflow's `Build HTML` node. That node HTML-escapes the
+model's text and emits only a fixed tag set, but the `/reports` page treats the column
+as untrusted anyway and passes it through an allowlist sanitiser
+(`web/lib/sanitizeReportHtml.js`, built on `sanitize-html`) before rendering: only
+listed tags, attributes and CSS properties survive; scripts, iframes, event handlers
+and `javascript:` / `data:` URLs are dropped, and links are forced to
+`rel="noopener noreferrer nofollow"`. The allowlist is wide enough that the existing
+report design renders unchanged.

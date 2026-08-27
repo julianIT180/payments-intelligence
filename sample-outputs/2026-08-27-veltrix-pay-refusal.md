@@ -35,11 +35,13 @@ analysis model returned a refusal rather than a brief. See
 
 ---
 
-## TODO — verbatim artifact to add
+## TODO — paste the verbatim refusal here
 
 This run was **not** persisted, so the only source of the exact text is the n8n
-execution: `Analyse and Draft Brief` node output → the `text` field.
+execution: `Analyse and Draft Brief` node output → the `text` field. Paste it
+whole — the leading `INSUFFICIENT EVIDENCE …` line and the "what would be needed"
+list. Do not edit it. No execution IDs or timestamps needed.
 
-Paste it verbatim below this line as fenced text — the leading
-`INSUFFICIENT EVIDENCE …` line and the "what would be needed" list that follows.
-Do not edit it. No execution IDs or timestamps needed.
+```text
+<paste Analyse and Draft Brief `text` here, unedited>
+```

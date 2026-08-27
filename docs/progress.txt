@@ -384,6 +384,40 @@ headline/summary/category/... sind ohnehin nullable -> kein Schema-Wechsel.
 
 ---
 
+## Public-Ready-Sprint (27.08.)
+
+Repo fuer eine finale manuelle Review vor dem Public-Schalten vorbereitet.
+Keine n8n-Business-Logik, keine Modelle, kein Retrieval veraendert.
+
+- LICENSE (MIT) im Root.
+- pipeline/: lesbare Referenzkopien der Code-Node-Logik (clean-and-rank-sources,
+  extract-article-text, assemble-brief, prepare-db-record u.a.) mit Kopf
+  "Reference copy exported from n8n. The workflow JSON remains the source of truth."
+  Wird nirgends importiert. pipeline/README.md ordnet die Teile in den Flow ein.
+- HTML-Sicherheit: /reports rendert weekly_reports.report_html jetzt durch
+  web/lib/sanitizeReportHtml.js (sanitize-html, Allowlist fuer Tags/Attribute/CSS).
+  Skripte, iframes, Event-Handler, javascript:/data: entfernt. Report-Design
+  unveraendert. Trust Boundary in docs/architecture.md dokumentiert.
+- evaluation/: cases/*.json (Erwartungen) + fixtures/*.result.json (aufgezeichnete
+  Laeufe) + validate.mjs. Ruft NICHT n8n auf; vergleicht Fixtures gegen Cases,
+  PASS/FAIL/INCOMPLETE, Exitcode. case-02 vollstaendig, case-01 fehlen brief_id
+  und db_rows (im Fixture als _incomplete markiert). "Initial reproducible
+  evaluation set", kein Benchmark.
+- .github/workflows/ci.yml: npm ci + build + lint in web/, Workflow-JSON parsen,
+  evaluation/validate.mjs, Secret-Pattern-Scan. Build mit Platzhalter-Env
+  (http://localhost:54321), keine Repo-Secrets noetig.
+- docs/public-readiness.md: objektive Gates, nur erfuellte abgehakt.
+- docs/evaluation.md (aus vorherigem Schritt) bleibt die Prosa-Fassung.
+- README: "At a glance"-Block, Validierungs-Tabelle (nur belegte Zahlen),
+  drei auskommentierte Screenshot-Platzhalter (docs/img/), Grenzen um
+  Form-Trigger-Auth und kurze Betriebshistorie ergaenzt, Tavily-Entscheidung
+  notiert. "zwei Quellen" -> "drei Quellen" korrigiert.
+
+Offen fuer den Reviewer: 3 Screenshots nach docs/img/, die zwei Sample-Texte
+(brief_markdown / Refusal-Text) einfuegen, CI einmal gruen laufen lassen.
+
+---
+
 ## Kosten (Stand 26.08.2026)
 
 - Anthropic: ca. $1.50 verbraucht, Guthaben $5, Monatslimit $5, Warnung bei $3
