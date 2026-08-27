@@ -98,24 +98,31 @@ flowchart TD
 
     COMBINE --> TRIAGE["Triage Relevance<br/><b>Haiku 4.5</b> · score 0-100<br/><i>threshold 25 · one call per run</i>"]
     TRIAGE --> CLEAN["Clean and Rank Sources<br/><i>never-use list · tiering · dedup · boilerplate</i>"]
-    CLEAN --> META["Extract Metadata<br/><b>Haiku 4.5</b> + structured output parser<br/><i>closed vocabulary</i>"]
+    CLEAN --> META["Extract Metadata<br/><b>Haiku 4.5</b> + structured output parser<br/><i>closed vocabulary · fields nullable when unsupported</i>"]
     META --> DRAFT["Analyse and Draft Brief<br/><b>Sonnet 5</b> · max_tokens 4000"]
-    DRAFT --> ASM["Assemble Brief"]
-    ASM --> PREP["Prepare DB Record<br/><i>content hash + quality gate</i>"]
+    DRAFT --> ASM["Assemble Brief<br/><i>sets model_refused</i>"]
+    ASM --> PREP["Prepare DB Record<br/><i>content hash + publication gate</i>"]
 
-    PREP --> GATE{"confidence >= 40<br/>sources >= 2"}
-    GATE -->|"below threshold"| DROP(["discarded"])
-    GATE -->|"pass"| INS["Insert Brief<br/><i>on conflict do update</i><br/><i>returning id, (xmax = 0)</i>"]
+    PREP --> GATE{"Persist Brief?<br/>model_refused = false · had_enough_evidence<br/>source_count ≥ 3 · confidence ≥ 40"}
+    GATE -->|"skipped — no DB write"| RET(["Return Result"])
+    GATE -->|"persist"| INS["Insert Brief<br/><i>on conflict do update</i><br/><i>returning id, (xmax = 0)</i>"]
     INS --> INSS["Insert Sources"]
-    INSS --> RET(["Return Result"])
+    INSS --> RET
 
     classDef model fill:#2d1e3d,stroke:#9b6bc7,color:#fff
     classDef gate fill:#3d2b1f,stroke:#c17f3f,color:#fff
-    classDef drop fill:#3d1f1f,stroke:#c74a4a,color:#fff
     class TRIAGE,META,DRAFT model
     class GATE gate
-    class DROP drop
 ```
+
+Two refusals guard the database. The **analysis model** returns a bare
+`INSUFFICIENT EVIDENCE` line when fewer than three sources survive filtering or the
+survivors miss the topic; `Assemble Brief` records this as the strict boolean
+`model_refused`. The **publication gate** — `Prepare DB Record` computing the
+decision, the `Persist Brief?` switch routing it — writes a brief only when
+`model_refused` is `false`, `had_enough_evidence` is set, `source_count >= 3` and
+`confidence_score >= 40`. A skipped run returns its summary and never calls
+`Insert Brief` or `Insert Sources`, so nothing partial reaches Postgres.
 
 ### Why this order
 
@@ -131,6 +138,19 @@ flowchart TD
 Rules recognise **format**; models recognise **substance**. An intermediate attempt to
 infer relevance from URL patterns (discard anything under `/news`) matched legitimate
 article URLs and cut the source count from 9 to 2.
+
+### Metadata extraction tolerates thin evidence
+
+`Extract Metadata` runs against an explicit JSON Schema, not one inferred from an
+example. Descriptive fields (`headline`, `summary`, `event_type`, the three
+`*_relevance` fields) are `string | null`; the entity lists may be empty; only
+`impact_score` and `confidence_score` are mandatory, and both are bounded 0–100.
+The prompt states that `null`, `[]` and a low score are the honest answers when the
+evidence is thin — the model is never told to fill a field to satisfy the parser.
+An early version generated the schema from a sample, which made every field a
+required non-null value; a run with genuinely missing metadata then failed schema
+validation *before* the analysis step could return `INSUFFICIENT EVIDENCE`.
+Partial metadata now flows through and the refusal and publication gate decide.
 
 ### Inside "Clean and Rank Sources"
 

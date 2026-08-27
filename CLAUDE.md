@@ -32,6 +32,11 @@ LLM. Rules check format; models assess content.
 - Do not change Anthropic model IDs, run frequency, volume or model tier without an
   explicit decision. Model choice follows task difficulty (Haiku for triage and
   extraction, Sonnet for analysis and synthesis).
+- Two refusal layers must both stay intact: the model-level `INSUFFICIENT EVIDENCE`
+  return in `Analyse and Draft Brief`, and the four-condition publication gate in
+  `Prepare DB Record` / `Persist Brief?` (`model_refused` false, `had_enough_evidence`,
+  `source_count >= 3`, `confidence_score >= 40`). Do not relax a source-quality or
+  publication threshold without an explicit decision.
 - Known live risks — do not silently "fix": Tavily pay-as-you-go is on; the n8n form
   trigger has no authentication (safe only while n8n is local).
 

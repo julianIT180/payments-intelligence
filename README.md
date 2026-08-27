@@ -6,7 +6,29 @@ good enough.
 
 **Live site:** https://payments-intelligence.vercel.app/
 **Architecture:** [`docs/architecture.md`](docs/architecture.md) ·
-**Workflows:** [`workflows/`](workflows/)
+**Workflows:** [`workflows/`](workflows/) ·
+**Evaluation:** [`docs/evaluation.md`](docs/evaluation.md)
+
+At a glance:
+
+- **A running system, not a prompt.** Three n8n workflows on a schedule: an on-demand
+  brief pipeline, a monitor that runs it over a watchlist every two days, and a weekly
+  report that clusters and emails the results. Retry logic, cost caps, unattended.
+- **Source-grounded.** Every factual claim in a brief carries a `[S#]` marker tied to a
+  URL that was actually fetched. The model may use only the retrieved evidence.
+- **Rules and models do different jobs.** Deterministic checks handle format, domain
+  tiering and de-duplication; language models handle topical relevance and analysis.
+  Cheap checks run first.
+- **Provenance is stored.** Each source keeps its tier (regulator → company → trade
+  press → other), its origin (search vs RSS), and whether full article text was retrieved.
+- **Two refusal layers.** The analysis model returns `INSUFFICIENT EVIDENCE` rather than
+  fill gaps; a separate publication gate then stores a brief only when it is not a
+  refusal, has ≥ 3 ranked sources and clears a confidence threshold. Skipped runs never
+  touch the database.
+- **Validated by hand.** Two live cases are recorded in
+  [`docs/evaluation.md`](docs/evaluation.md) — one well-evidenced topic that publishes,
+  one fabricated company that is refused *despite* three topic-adjacent sources
+  surviving the filters.
 
 ---
 
@@ -136,13 +158,22 @@ whether the row was new.
 
 ### The system is allowed to say no
 
-A quality gate sits between analysis and storage: `confidence >= 40` **and**
-`sources >= 2`. Briefs below it are discarded rather than published.
+Two independent refusals sit between retrieval and the database.
 
-The first calibration was `sources >= 3` and `confidence >= 35`, and it rejected a Stripe
-brief that scored 55 on confidence from two strong sources. The threshold was measuring
-source count twice — the confidence score already accounts for it. Two good sources beat
-five weak ones.
+**Model-level.** When fewer than three sources survive filtering, or the survivors do
+not address the topic, the analysis model returns a single line —
+`INSUFFICIENT EVIDENCE — …` — instead of a brief. `Assemble Brief` detects that
+leading marker and sets a strict boolean, `model_refused`.
+
+**Publication policy.** A brief is written to Postgres only when all four hold:
+`model_refused` is false, the pipeline's `had_enough_evidence` flag is set,
+`source_count >= 3`, and the model-assigned `confidence_score >= 40`. Anything else is
+marked skipped and routed straight to the run summary — `Insert Brief` and
+`Insert Sources` never run for it, so no partial row is written.
+
+An earlier calibration briefly dropped the source-count floor, on the argument that the
+confidence score already accounts for it. It was reinstated: a conservative publication
+policy is worth more here than one extra stored brief.
 
 The behaviour was tested against a topic that does not exist: *"Zyloric Payments
 Consortium"*. The retrieval stage returned eight plausible payments articles, and the model
@@ -152,6 +183,21 @@ declined to use them:
 
 `INSUFFICIENT EVIDENCE`. That is the intended behaviour, and one of the most revealing
 tests for a retrieval-augmented system.
+
+### Validation runs
+
+Two cases were run by hand against the live workflow on 2026-08-27. Full detail in
+[`docs/evaluation.md`](docs/evaluation.md); this is an initial manual set, not a
+benchmark.
+
+| Input | Sources | Result |
+|---|---|---|
+| `digital euro` (real, active) | 8 (5 tier-1) | Published — impact 78, confidence 82 |
+| `Veltrix Pay agentic commerce settlement network` (**fabricated**) | 3 survived filtering, 8 dropped at triage | Refused — `model_refused`, skipped, no row written |
+
+The second case is the harder one: the fabricated company still drew three plausible,
+topic-adjacent sources — enough to pass the source-count floor — and the model still
+declined to build a brief around adjacent material.
 
 ## Design decisions
 
