@@ -1,0 +1,23 @@
+{
+  "id": "case-01-digital-euro",
+  "title": "Well-evidenced topic is published",
+  "kind": "positive",
+  "fabricated": false,
+  "input": { "topic": "digital euro", "timeframe": "year" },
+  "objective": "A real, currently-active topic with strong primary sourcing passes every stage and is persisted, with metadata that reflects the evidence.",
+  "why_it_matters": "Exercises the whole path end to end: two retrieval channels, triage, deterministic ranking, structured metadata extraction against the explicit schema, the Sonnet analysis, and both publication-gate conditions passing.",
+  "expect": [
+    { "field": "extract_metadata_ok", "op": "truthy" },
+    { "field": "had_enough_evidence", "op": "eq", "value": true },
+    { "field": "model_refused", "op": "eq", "value": false },
+    { "field": "source_count", "op": "gte", "value": 3 },
+    { "field": "extract_metadata.confidence_score", "op": "gte", "value": 40 },
+    { "field": "prepare_db_record.skipped", "op": "eq", "value": false },
+    { "field": "persist_brief_branch", "op": "eq", "value": "true" },
+    { "field": "insert_brief_executed", "op": "eq", "value": true },
+    { "field": "insert_sources_executed", "op": "eq", "value": true },
+    { "field": "return_result.was_new", "op": "eq", "value": true },
+    { "field": "return_result.brief_id", "op": "exists" },
+    { "field": "db_rows_for_topic", "op": "gte", "value": 1 }
+  ]
+}

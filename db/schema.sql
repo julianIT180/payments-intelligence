@@ -8,8 +8,12 @@
 
 -- ---------------------------------------------------------------------------
 -- briefs
---   One row per accepted brief. Rows that fail the quality gate
---   (confidence >= 40 and sources >= 2) are never inserted.
+--   One row per accepted brief. The workflow inserts a row only when all of
+--   model_refused = false, had_enough_evidence, source_count >= 3 and
+--   confidence_score >= 40 hold; skipped runs never reach this table.
+--   Descriptive columns (headline, summary, category, event_type, *_relevance)
+--   may be null: the extractor is allowed to return null when the evidence did
+--   not support a field. Scores are always present and bounded 0-100.
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.briefs (

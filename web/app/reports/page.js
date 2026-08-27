@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase';
+import { sanitizeReportHtml } from '../../lib/sanitizeReportHtml';
 
 export const revalidate = 300;
 
@@ -47,7 +48,7 @@ export default async function Reports() {
               </summary>
               <div
                 className="border-t border-stone-100 px-2 pb-4"
-                dangerouslySetInnerHTML={{ __html: r.report_html }}
+                dangerouslySetInnerHTML={{ __html: sanitizeReportHtml(r.report_html) }}
               />
             </details>
           ))}

@@ -40,11 +40,12 @@ Normalize Tavily         Fetch Feeds
                     |
          Analyse and Draft Brief (Sonnet 5)
                     |
-            Assemble Brief
+            Assemble Brief  (setzt model_refused)
                     |
-       Prepare DB Record (Hash + Qualitaetsschwelle)
+       Prepare DB Record (Hash + Publikations-Gate)
                     |
-       Insert Brief -> Insert Sources -> Return Result
+       Persist Brief?  --persist-->  Insert Brief -> Insert Sources -> Return Result
+                       --skip------------------------------------->  Return Result
 ```
 
 ### Workflow 2: Daily Payments Monitor
@@ -200,8 +201,9 @@ Erst MIN_SOURCES = 3 UND MIN_CONFIDENCE = 35.
 Stripe verworfen mit "2 Quellen, confidence 55" — Confidence lag ueber der
 Grenze, es scheiterte an der Quellenzahl. Zwei gute Quellen sind mehr wert
 als fuenf schwache.
-Fix: MIN_CONFIDENCE = 40, HARD_MIN_SOURCES = 2.
-Der Confidence-Score enthaelt die Quellenzahl bereits.
+Damals geplant: MIN_CONFIDENCE = 40, Quellenuntergrenze lockern.
+Tatsaechlich blieb der Export lange bei 3 / 35. Vereinheitlicht am 27.08.
+(siehe "Publikations-Gate vereinheitlicht" unten).
 
 ### Zeitfenster
 'week' ergab bei Einzelunternehmen 1 Quelle und Briefs ueber Stellenanzeigen.
@@ -322,6 +324,98 @@ Nach dem Push: Repo-Suche nach sk-ant, tvly-, sb_secret -> null Treffer.
 
 Offen in Phase 9: Diff-Review durch Julian, dann ein sauberer Commit;
 Entscheidung ueber Repo-Public.
+
+---
+
+## Publikations-Gate vereinheitlicht (27.08.)
+
+Zwei Verweigerungen, klar getrennt.
+
+Modellseitig (Analyse-Prompt, Regel 4): bei < 3 Quellen oder Quellen ohne
+Themenbezug antwortet Sonnet nur mit "INSUFFICIENT EVIDENCE — ...".
+Assemble Brief erkennt den fuehrenden Grossbuchstaben-Marker und setzt den
+strikten Boolean model_refused.
+
+Publikationsrichtlinie (Prepare DB Record): speichern nur, wenn ALLE gelten —
+model_refused === false, had_enough_evidence === true, source_count >= 3,
+confidence_score >= 40. Sonst { skipped: true }.
+
+Neuer IF-Node "Persist Brief?" prueft "skipped is false":
+  TRUE  -> Insert Brief -> Insert Sources -> Return Result
+  FALSE -> Return Result
+
+Uebersprungene Laeufe erreichen Insert Brief / Insert Sources nicht mehr.
+Vorher lief der Skip-Sentinel durch Insert Brief, loeste eine NOT-NULL-
+Verletzung aus und wurde nur von onError = continueRegularOutput aufgefangen.
+
+MIN_CONFIDENCE 35 -> 40. Persist-Pfad gibt jetzt explizit skipped: false zurueck.
+Kein Schema-, Modell- oder Retrieval-Wechsel am Gate selbst.
+
+---
+
+## Metadaten-Extraktion robust gemacht (27.08.)
+
+Live-Test 1 brach in "Extract Metadata" / Structured Output Parser ab:
+"Model output doesn't fit required format".
+
+Ursache: Der Parser war aus einem JSON-Beispiel generiert ("Generate From
+JSON Example"). Jedes Feld im Beispiel wird dadurch als PFLICHT mit
+konkretem Typ (String / Zahl / Array) erzwungen. Der Prompt sagt aber
+"wenn ein Feld nicht belegbar ist, null zurueckgeben". Bei duenner Evidenz
+liefert Haiku also null fuer headline/summary etc. -> Schema lehnt null ab
+-> Pipeline crasht VOR dem Analyse-Schritt. Der Lauf konnte gar nicht bis
+zu einem ehrlichen INSUFFICIENT EVIDENCE kommen.
+
+Fix, ohne Qualitaet zu senken und ohne Fehler zu verstecken:
+- Parser auf "Define Below" (explizites JSON Schema) umgestellt.
+  Beschreibende Textfelder: type ["string","null"] (null erlaubt).
+  Listen: array of string, [] erlaubt, nie erfunden.
+  impact_score / confidence_score: Pflicht, Zahl 0-100, nie null.
+  category: Pflicht-String; Vokabular inkl. "other"-Fallback im Prompt.
+- Extract-Metadata-Prompt praezisiert: null/[]/niedrige Zahl sind ehrliche
+  Antworten bei duenner Evidenz; Scores immer als Zahl; genau ein
+  JSON-Objekt, keine Code-Fences, kein Text drumherum.
+- Kein Auto-Fixing-Format, kein On-Error/Continue. Echte Formatfehler
+  brechen weiterhin sichtbar ab.
+
+Downstream unveraendert: Assemble Brief (meta = rawMeta.output || rawMeta),
+Prepare DB Record (str()/num()/arr() vertragen null/[] bereits). DB-Spalten
+headline/summary/category/... sind ohnehin nullable -> kein Schema-Wechsel.
+
+---
+
+## Public-Ready-Sprint (27.08.)
+
+Repo fuer eine finale manuelle Review vor dem Public-Schalten vorbereitet.
+Keine n8n-Business-Logik, keine Modelle, kein Retrieval veraendert.
+
+- LICENSE (MIT) im Root.
+- pipeline/: lesbare Referenzkopien der Code-Node-Logik (clean-and-rank-sources,
+  extract-article-text, assemble-brief, prepare-db-record u.a.) mit Kopf
+  "Reference copy exported from n8n. The workflow JSON remains the source of truth."
+  Wird nirgends importiert. pipeline/README.md ordnet die Teile in den Flow ein.
+- HTML-Sicherheit: /reports rendert weekly_reports.report_html jetzt durch
+  web/lib/sanitizeReportHtml.js (sanitize-html, Allowlist fuer Tags/Attribute/CSS).
+  Skripte, iframes, Event-Handler, javascript:/data: entfernt. Report-Design
+  unveraendert. Trust Boundary in docs/architecture.md dokumentiert.
+- evaluation/: cases/*.json (Erwartungen) + fixtures/*.result.json (aufgezeichnete
+  Laeufe) + validate.mjs. Ruft NICHT n8n auf; vergleicht Fixtures gegen Cases,
+  PASS/FAIL/NOT-CAPTURED, Exitcode. Beide Faelle bestehen auf allen erfassten
+  Feldern; case-01 fehlen drei optionale Werte (brief_id, db_rows, category),
+  im Fixture als _not_captured markiert. "Initial reproducible evaluation set",
+  kein Benchmark.
+- .github/workflows/ci.yml: npm ci + build + lint in web/, Workflow-JSON parsen,
+  evaluation/validate.mjs, Secret-Pattern-Scan. Build mit Platzhalter-Env
+  (http://localhost:54321), keine Repo-Secrets noetig.
+- docs/public-readiness.md: objektive Gates, nur erfuellte abgehakt.
+- docs/evaluation.md (aus vorherigem Schritt) bleibt die Prosa-Fassung.
+- README: "At a glance"-Block, Validierungs-Tabelle (nur belegte Zahlen),
+  drei auskommentierte Screenshot-Platzhalter (docs/img/), Grenzen um
+  Form-Trigger-Auth und kurze Betriebshistorie ergaenzt, Tavily-Entscheidung
+  notiert. "zwei Quellen" -> "drei Quellen" korrigiert.
+
+Offen fuer den Reviewer: 3 Screenshots nach docs/img/, die zwei Sample-Texte
+(brief_markdown / Refusal-Text) einfuegen, CI einmal gruen laufen lassen.
 
 ---
 

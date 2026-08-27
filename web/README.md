@@ -9,7 +9,8 @@ For the project as a whole — what it does, why, and how the pipeline works —
 
 ## Stack
 
-Next.js 16 · React 19 · Tailwind CSS 4 · `@supabase/supabase-js` · deployed on Vercel.
+Next.js 16 · React 19 · Tailwind CSS 4 · `@supabase/supabase-js` · `sanitize-html`
+(allowlist for the stored weekly-report HTML) · deployed on Vercel.
 
 Pages are written as `.js` rather than `.tsx` deliberately. `create-next-app` installs the
 TypeScript toolchain and the config stays in place; the application code is plain
@@ -23,7 +24,7 @@ shapes.
 | `/` | `briefs` | Feed — key figures and brief cards, impact colour-coded, confidence as a bar |
 | `/brief/[id]` | `briefs`, `brief_sources` | Full brief, ranked source list with tier, origin and headline-only markers |
 | `/companies` | `briefs` | Grouped by company, sorted by frequency |
-| `/reports` | `weekly_reports` | Weekly reports, newest first |
+| `/reports` | `weekly_reports` | Weekly reports, newest first — stored HTML passed through an allowlist sanitiser (`lib/sanitizeReportHtml.js`) before render |
 | `/about` | — | Method, score definitions, stated limitations |
 
 ## Local development

@@ -6,7 +6,39 @@ good enough.
 
 **Live site:** https://payments-intelligence.vercel.app/
 **Architecture:** [`docs/architecture.md`](docs/architecture.md) ·
-**Workflows:** [`workflows/`](workflows/)
+**Workflows:** [`workflows/`](workflows/) ·
+**Evaluation:** [`docs/evaluation.md`](docs/evaluation.md)
+
+At a glance:
+
+- **A running system, not a prompt.** Three n8n workflows on a schedule: an on-demand
+  brief pipeline, a monitor that runs it over a watchlist every two days, and a weekly
+  report that clusters and emails the results. Retry logic, cost caps, unattended.
+- **Source-grounded.** Every factual claim in a brief carries a `[S#]` marker tied to a
+  URL that was actually fetched. The model may use only the retrieved evidence.
+- **Rules and models do different jobs.** Deterministic checks handle format, domain
+  tiering and de-duplication; language models handle topical relevance and analysis.
+  Cheap checks run first.
+- **Provenance is stored.** Each source keeps its tier (regulator → company → trade
+  press → other), its origin (search vs RSS), and whether full article text was retrieved.
+- **Two refusal layers.** The analysis model returns `INSUFFICIENT EVIDENCE` rather than
+  fill gaps; a separate publication gate then stores a brief only when it is not a
+  refusal, has ≥ 3 ranked sources and clears a confidence threshold. Skipped runs never
+  touch the database.
+- **Read through a live site.** A Next.js frontend on Vercel
+  ([payments-intelligence.vercel.app](https://payments-intelligence.vercel.app/)) reads
+  the same database, server-rendered, no write path: a feed ranked by impact, per-brief
+  source lists with tiers, a company view, the weekly report archive, and an About page
+  that states the method and the limitations.
+- **Validated by hand.** Two live cases are recorded in
+  [`docs/evaluation.md`](docs/evaluation.md) — one well-evidenced topic that publishes,
+  one fabricated company that is refused *despite* three topic-adjacent sources
+  surviving the filters.
+
+![The intelligence feed: developments ranked by impact, each with a category, date, primary-source count and confidence bar](docs/img/feed.png)
+
+*The live feed. Figures reflect a deliberately short operating window — the point is the
+structure, not the volume.*
 
 ---
 
@@ -39,6 +71,8 @@ Each brief is a structured record, not a blob of text:
 - **`what_to_monitor`** and **`evidence_gaps`** — what the brief does *not* establish
 - a full source list, each with tier, origin, and a flag for headline-only retrieval
 
+![A brief on the digital euro: impact and confidence scored separately, eight sources (five regulator/official), and an executive summary where every factual sentence ends in a [S#] citation](docs/img/brief-digital-euro.png)
+
 A weekly report synthesises seven days of briefs: it clusters duplicate stories, excludes
 briefs that describe no development, ranks what remains, and publishes a **coverage note**
 stating what it merged and what it dropped.
@@ -59,11 +93,11 @@ stating what it merged and what it dropped.
                                      |
                         Clean and Rank     (rules: boilerplate, dedup, tiering)
                                      |
-                        Extract Metadata   (Haiku 4.5, structured output)
+                        Extract Metadata   (Haiku 4.5, JSON-schema output)
                                      |
-                        Analyse and Draft  (Sonnet 5)
+                        Analyse and Draft  (Sonnet 5)   -> may return INSUFFICIENT EVIDENCE
                                      |
-                        Quality gate -> Postgres (or discarded)
+                        Publication gate -> Postgres     (refused or below threshold: no write)
 ```
 
 Three n8n workflows share one Postgres database. The on-demand brief workflow is also the
@@ -136,13 +170,22 @@ whether the row was new.
 
 ### The system is allowed to say no
 
-A quality gate sits between analysis and storage: `confidence >= 40` **and**
-`sources >= 2`. Briefs below it are discarded rather than published.
+Two independent refusals sit between retrieval and the database.
 
-The first calibration was `sources >= 3` and `confidence >= 35`, and it rejected a Stripe
-brief that scored 55 on confidence from two strong sources. The threshold was measuring
-source count twice — the confidence score already accounts for it. Two good sources beat
-five weak ones.
+**Model-level.** When fewer than three sources survive filtering, or the survivors do
+not address the topic, the analysis model returns a single line —
+`INSUFFICIENT EVIDENCE — …` — instead of a brief. `Assemble Brief` detects that
+leading marker and sets a strict boolean, `model_refused`.
+
+**Publication policy.** A brief is written to Postgres only when all four hold:
+`model_refused` is false, the pipeline's `had_enough_evidence` flag is set,
+`source_count >= 3`, and the model-assigned `confidence_score >= 40`. Anything else is
+marked skipped and routed straight to the run summary — `Insert Brief` and
+`Insert Sources` never run for it, so no partial row is written.
+
+An earlier calibration briefly dropped the source-count floor, on the argument that the
+confidence score already accounts for it. It was reinstated: a conservative publication
+policy is worth more here than one extra stored brief.
 
 The behaviour was tested against a topic that does not exist: *"Zyloric Payments
 Consortium"*. The retrieval stage returned eight plausible payments articles, and the model
@@ -153,12 +196,27 @@ declined to use them:
 `INSUFFICIENT EVIDENCE`. That is the intended behaviour, and one of the most revealing
 tests for a retrieval-augmented system.
 
+### Validation runs
+
+Two cases were run by hand against the live workflow on 2026-08-27. Full detail in
+[`docs/evaluation.md`](docs/evaluation.md); this is an initial manual set, not a
+benchmark.
+
+| Input | Sources | Result |
+|---|---|---|
+| `digital euro` (real, active) | 8 (5 tier-1) | Published — impact 78, confidence 82 |
+| `Veltrix Pay agentic commerce settlement network` (**fabricated**) | 3 survived filtering, 8 dropped at triage | Refused — `model_refused`, skipped, no row written |
+
+The second case is the harder one: the fabricated company still drew three plausible,
+topic-adjacent sources — enough to pass the source-count floor — and the model still
+declined to build a brief around adjacent material.
+
 ## Design decisions
 
 | Decision | Alternative considered | Why | Trade-off accepted |
 |---|---|---|---|
 | Haiku for triage and extraction, Sonnet for analysis | Sonnet throughout | Triage is classification, not reasoning; roughly half the cost per call | Haiku extracts too generously — it pulled companies from off-topic sources that Sonnet ignored. Mitigated by a fixed output vocabulary. |
-| Structured output parser with a closed vocabulary | Free-text categories | Without it the model invents new category names on every run, and scores stop being comparable | Genuinely novel event types get forced into an existing bucket |
+| Closed vocabulary for `category`; explicit JSON Schema for the rest | Free-text fields, or a schema generated from an example | A fixed category set keeps scores comparable across runs; an explicit schema lets unsupported fields be `null` instead of failing validation on thin evidence | A genuinely novel development is forced into `category: "other"` |
 | Supabase Postgres | Google Sheets | Sheets needs a Google Cloud project and OAuth (~20 steps); real SQL enables a `unique` constraint for dedup; the frontend needs Postgres anyway | Another hosted dependency |
 | Existing workflow gets a second trigger | Rebuild the pipeline inside the scheduler | The analysis logic lives in exactly one place | n8n requires the sub-workflow to be published before the scheduler can call it |
 | `On Error: Continue` on the sub-workflow node | Stop on error | Five topics are 15 API calls; a failure on topic 3 must not suppress 4 and 5 | Partial runs need to be visible in the run summary |
@@ -185,7 +243,15 @@ and under 60 % uppercase words — moved confidence from **48 to 72** and impact
   are internally consistent and useful for ranking. They are not validated predictions.
 - **English-language sources dominate.** The tier lists are Europe- and US-weighted.
 - **No human review.** Nothing between the model and the published page.
-- **Small evidence base per brief.** The gate requires two sources, not ten.
+- **Small evidence base per brief.** The gate requires three sources, not ten.
+- **The on-demand form trigger has no authentication.** Safe only while n8n runs
+  locally; it must be secured or removed before the instance is hosted. No credential
+  or endpoint is exposed by this repository.
+- **Short operating history.** The database holds a small number of briefs from a
+  short window, so any aggregate figure is a small sample. Metrics belong on a live
+  page, not frozen in this README (see Roadmap).
+
+![The About page: scoring definitions, and a limitations section stating plainly what the system does not do](docs/img/about-limitations.png)
 
 The live site states the same limitations on its `/about` page.
 
@@ -199,17 +265,22 @@ The live site states the same limitations on its `/about` page.
 
 Two-thirds of the pipeline's LLM calls run on Haiku. A monthly cap and a warning threshold
 are set on the Anthropic account, and auto-reload is deliberately off — a runaway loop
-should fail, not bill.
+should fail, not bill. Tavily pay-as-you-go is left enabled at the current low volume;
+the decision of record is to disable it before raising volume, frequency or search depth.
 
 ## Repository layout
 
 ```
-db/          schema and metric queries
-docs/        architecture diagrams, development log
-sample-outputs/  placeholder; samples will be regenerated from the live workflow
-screenshots/  one screenshot of the on-demand brief workflow
-web/         Next.js frontend (App Router, Tailwind), deployed on Vercel
-workflows/   the three n8n workflows as exported JSON
+db/              schema and metric queries
+docs/            architecture diagrams, development log, evaluation, readiness checklist
+docs/img/        README screenshots (see docs/img/README.md)
+evaluation/      case definitions, result fixtures, and validate.mjs
+pipeline/        readable reference copies of the workflow's Code-node logic
+sample-outputs/  note on why raw briefs are not committed yet (see the live site)
+screenshots/     one screenshot of the on-demand brief workflow
+web/             Next.js frontend (App Router, Tailwind), deployed on Vercel
+workflows/       the three n8n workflows as exported JSON
+.github/         CI (build, lint, workflow-JSON parse, evaluation, secret scan)
 ```
 
 ## Running it yourself
