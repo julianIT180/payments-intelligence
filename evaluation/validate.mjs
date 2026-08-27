@@ -58,7 +58,7 @@ for (const cf of caseFiles) {
     continue;
   }
 
-  const incompleteFields = new Set(fx._incomplete || []);
+  const incompleteFields = new Set(fx._not_captured || fx._incomplete || []);
   console.log(`\n${c.id}  (${c.kind})  ${c.title}`);
   console.log(`  input: ${JSON.stringify(c.input)}${c.fabricated ? '   [fabricated subject]' : ''}`);
 
@@ -69,7 +69,7 @@ for (const cf of caseFiles) {
 
     if (missing) {
       totalIncomplete++;
-      console.log(`  INCOMPLETE  ${label}   (fixture has no value yet)`);
+      console.log(`  NOT CAPTURED ${label}   (value not recorded for this run)`);
       continue;
     }
     if (check(a.op, actual, a.value)) {
@@ -83,7 +83,7 @@ for (const cf of caseFiles) {
 }
 
 console.log(
-  `\n${caseFiles.length} case(s): ${totalPass} pass, ${totalFail} fail, ${totalIncomplete} incomplete` +
+  `\n${caseFiles.length} case(s): ${totalPass} pass, ${totalFail} fail, ${totalIncomplete} not captured` +
     (STRICT ? '  (strict)' : ''),
 );
 

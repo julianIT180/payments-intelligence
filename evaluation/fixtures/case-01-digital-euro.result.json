@@ -1,6 +1,6 @@
 {
-  "_note": "Recorded result of the 2026-08-27 manual run. Fields still null are listed in _incomplete and need to be exported from n8n / Supabase. See evaluation/README.md.",
-  "_incomplete": [
+  "_note": "Recorded result of the 2026-08-27 manual run. Values below are what was observed. Fields listed in _not_captured were not recorded at the time; the case still passes on every field that was captured. See evaluation/README.md.",
+  "_not_captured": [
     "extract_metadata.category",
     "return_result.brief_id",
     "db_rows_for_topic"

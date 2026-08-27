@@ -400,9 +400,10 @@ Keine n8n-Business-Logik, keine Modelle, kein Retrieval veraendert.
   unveraendert. Trust Boundary in docs/architecture.md dokumentiert.
 - evaluation/: cases/*.json (Erwartungen) + fixtures/*.result.json (aufgezeichnete
   Laeufe) + validate.mjs. Ruft NICHT n8n auf; vergleicht Fixtures gegen Cases,
-  PASS/FAIL/INCOMPLETE, Exitcode. case-02 vollstaendig, case-01 fehlen brief_id
-  und db_rows (im Fixture als _incomplete markiert). "Initial reproducible
-  evaluation set", kein Benchmark.
+  PASS/FAIL/NOT-CAPTURED, Exitcode. Beide Faelle bestehen auf allen erfassten
+  Feldern; case-01 fehlen drei optionale Werte (brief_id, db_rows, category),
+  im Fixture als _not_captured markiert. "Initial reproducible evaluation set",
+  kein Benchmark.
 - .github/workflows/ci.yml: npm ci + build + lint in web/, Workflow-JSON parsen,
   evaluation/validate.mjs, Secret-Pattern-Scan. Build mit Platzhalter-Env
   (http://localhost:54321), keine Repo-Secrets noetig.

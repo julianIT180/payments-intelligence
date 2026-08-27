@@ -1,6 +1,6 @@
 {
-  "_note": "Recorded result of the 2026-08-27 manual run. All fields asserted by case-02 were captured. extract_metadata scores and the full refusal text were not recorded but are not asserted; the verbatim refusal text is tracked in sample-outputs/2026-08-27-veltrix-pay-refusal.md.",
-  "_incomplete": [],
+  "_note": "Recorded result of the 2026-08-27 manual run. All fields asserted by case-02 were captured. extract_metadata scores and the full verbatim refusal text were not recorded (not captured); they are not asserted by this case.",
+  "_not_captured": [],
   "captured_at": "2026-08-27",
   "input": { "topic": "Veltrix Pay agentic commerce settlement network", "timeframe": "year" },
   "fabricated": true,

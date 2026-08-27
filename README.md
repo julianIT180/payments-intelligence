@@ -35,11 +35,10 @@ At a glance:
   one fabricated company that is refused *despite* three topic-adjacent sources
   surviving the filters.
 
-<!-- Screenshots — add the three PNGs to docs/img/ and uncomment (see docs/img/README.md):
-![Intelligence feed ranked by impact](docs/img/feed.png)
-![Digital euro brief with tiered source list](docs/img/brief-digital-euro.png)
-![About page — method and stated limitations](docs/img/about-limitations.png)
--->
+![The intelligence feed: developments ranked by impact, each with a category, date, primary-source count and confidence bar](docs/img/feed.png)
+
+*The live feed. Figures reflect a deliberately short operating window — the point is the
+structure, not the volume.*
 
 ---
 
@@ -72,6 +71,8 @@ Each brief is a structured record, not a blob of text:
 - **`what_to_monitor`** and **`evidence_gaps`** — what the brief does *not* establish
 - a full source list, each with tier, origin, and a flag for headline-only retrieval
 
+![A brief on the digital euro: impact and confidence scored separately, eight sources (five regulator/official), and an executive summary where every factual sentence ends in a [S#] citation](docs/img/brief-digital-euro.png)
+
 A weekly report synthesises seven days of briefs: it clusters duplicate stories, excludes
 briefs that describe no development, ranks what remains, and publishes a **coverage note**
 stating what it merged and what it dropped.
@@ -92,11 +93,11 @@ stating what it merged and what it dropped.
                                      |
                         Clean and Rank     (rules: boilerplate, dedup, tiering)
                                      |
-                        Extract Metadata   (Haiku 4.5, structured output)
+                        Extract Metadata   (Haiku 4.5, JSON-schema output)
                                      |
-                        Analyse and Draft  (Sonnet 5)
+                        Analyse and Draft  (Sonnet 5)   -> may return INSUFFICIENT EVIDENCE
                                      |
-                        Quality gate -> Postgres (or discarded)
+                        Publication gate -> Postgres     (refused or below threshold: no write)
 ```
 
 Three n8n workflows share one Postgres database. The on-demand brief workflow is also the
@@ -215,7 +216,7 @@ declined to build a brief around adjacent material.
 | Decision | Alternative considered | Why | Trade-off accepted |
 |---|---|---|---|
 | Haiku for triage and extraction, Sonnet for analysis | Sonnet throughout | Triage is classification, not reasoning; roughly half the cost per call | Haiku extracts too generously — it pulled companies from off-topic sources that Sonnet ignored. Mitigated by a fixed output vocabulary. |
-| Structured output parser with a closed vocabulary | Free-text categories | Without it the model invents new category names on every run, and scores stop being comparable | Genuinely novel event types get forced into an existing bucket |
+| Closed vocabulary for `category`; explicit JSON Schema for the rest | Free-text fields, or a schema generated from an example | A fixed category set keeps scores comparable across runs; an explicit schema lets unsupported fields be `null` instead of failing validation on thin evidence | A genuinely novel development is forced into `category: "other"` |
 | Supabase Postgres | Google Sheets | Sheets needs a Google Cloud project and OAuth (~20 steps); real SQL enables a `unique` constraint for dedup; the frontend needs Postgres anyway | Another hosted dependency |
 | Existing workflow gets a second trigger | Rebuild the pipeline inside the scheduler | The analysis logic lives in exactly one place | n8n requires the sub-workflow to be published before the scheduler can call it |
 | `On Error: Continue` on the sub-workflow node | Stop on error | Five topics are 15 API calls; a failure on topic 3 must not suppress 4 and 5 | Partial runs need to be visible in the run summary |
@@ -250,6 +251,8 @@ and under 60 % uppercase words — moved confidence from **48 to 72** and impact
   short window, so any aggregate figure is a small sample. Metrics belong on a live
   page, not frozen in this README (see Roadmap).
 
+![The About page: scoring definitions, and a limitations section stating plainly what the system does not do](docs/img/about-limitations.png)
+
 The live site states the same limitations on its `/about` page.
 
 ## Cost
@@ -273,7 +276,7 @@ docs/            architecture diagrams, development log, evaluation, readiness c
 docs/img/        README screenshots (see docs/img/README.md)
 evaluation/      case definitions, result fixtures, and validate.mjs
 pipeline/        readable reference copies of the workflow's Code-node logic
-sample-outputs/  real runs, kept unedited (verbatim brief / refusal text pending paste)
+sample-outputs/  note on why raw briefs are not committed yet (see the live site)
 screenshots/     one screenshot of the on-demand brief workflow
 web/             Next.js frontend (App Router, Tailwind), deployed on Vercel
 workflows/       the three n8n workflows as exported JSON
