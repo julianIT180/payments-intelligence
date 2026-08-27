@@ -1,0 +1,24 @@
+# Normalise line endings so the repository stores LF and checkouts are
+# platform-appropriate. Without this, editing on Windows rewrites every line
+# of every file and each commit produces a diff over the whole codebase.
+* text=auto eol=lf
+
+# Windows-only tooling that expects CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary — never touch
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+
+# n8n exports are machine-generated; keep diffs readable but do not let
+# GitHub count them as authored source in the language statistics.
+workflows/*.json linguist-generated=true
+web/package-lock.json linguist-generated=true

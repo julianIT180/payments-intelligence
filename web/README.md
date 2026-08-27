@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend
 
-## Getting Started
+Next.js (App Router) reader for the Payments Intelligence database. Read-only: every page
+is a server component that queries Supabase directly. There are no API routes and no
+mutations.
 
-First, run the development server:
+For the project as a whole — what it does, why, and how the pipeline works — see the
+[repository README](../README.md).
+
+## Stack
+
+Next.js 16 · React 19 · Tailwind CSS 4 · `@supabase/supabase-js` · deployed on Vercel.
+
+Pages are written as `.js` rather than `.tsx` deliberately. `create-next-app` installs the
+TypeScript toolchain and the config stays in place; the application code is plain
+JavaScript because the type surface here is one Supabase client and a handful of row
+shapes.
+
+## Routes
+
+| Route | Reads | Content |
+|---|---|---|
+| `/` | `briefs` | Feed — key figures and brief cards, impact colour-coded, confidence as a bar |
+| `/brief/[id]` | `briefs`, `brief_sources` | Full brief, ranked source list with tier, origin and headline-only markers |
+| `/companies` | `briefs` | Grouped by company, sorted by frequency |
+| `/reports` | `weekly_reports` | Weekly reports, newest first |
+| `/about` | — | Method, score definitions, stated limitations |
+
+## Local development
 
 ```bash
+npm install
+cp .env.local.example .env.local   # then fill in the two values below
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key>
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Use the **publishable** key. `service_role` bypasses row-level security and must never
+reach the browser. Both variables are `NEXT_PUBLIC_*` and are therefore visible in the
+client bundle by design — the security boundary is the database grant and the RLS policy,
+not the key.
 
-## Learn More
+`.env.local` is gitignored and is **not** uploaded to Vercel. Deployment environment
+variables have to be set separately in the Vercel project settings.
 
-To learn more about Next.js, take a look at the following resources:
+## Database access
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Reading requires two independent things to be true:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. `grant select on public.briefs to anon` — may the role touch the table?
+2. a row-level-security policy — which rows may it see?
 
-## Deploy on Vercel
+A policy without the grant fails with `permission denied for table briefs`, which points at
+the wrong layer. Because *Automatically expose new tables* is switched off in the Supabase
+project, the grant is issued manually. Both are in [`db/schema.sql`](../db/schema.sql).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deployment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Vercel, with **Root Directory set to `web`**. Left at the repository root, the build fails
+with `No Next.js version detected`.

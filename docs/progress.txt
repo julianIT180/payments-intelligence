@@ -1,265 +1,363 @@
 # Progress Log — AI Payments Intelligence Platform
 
-Stand: 25. August 2026
-Umgebung: Windows, Docker Desktop, n8n 2.35.7 lokal auf localhost:5678
+Stand: 27. August 2026
+Live: https://payments-intelligence.vercel.app/
+Repo: github.com/julianIT180/payments-intelligence (privat)
+
+Umgebung: Windows, Docker Desktop, n8n 2.35.7 lokal, Supabase (Postgres, EU Frankfurt),
+Next.js auf Vercel, Node.js v24.20.0
 
 ---
 
-## Aktueller Systemaufbau
+## Systemaufbau
+
+### Workflow 1: Payments Intelligence – On-Demand Brief (Unterworkflow)
 
 ```
-On form submission (topic, timeframe)
-  |
-  +-- Build Search Query -- Tavily Search -- Normalize Tavily ---+
-  |                                                              |
-  +-- Feed List -- Fetch Feeds -- Parse XML -- Normalize Feed ---+
-                                                                 |
-                                                    Combine Sources (append)
-                                                                 |
-                                                    Triage Relevance (Haiku 4.5)
-                                                                 |
-                                                    Clean and Rank Sources
-                                                                 |
-                                                    Extract Metadata (Haiku 4.5)
-                                                                 |
-                                                    Analyse and Draft Brief (Sonnet 5)
-                                                                 |
-                                                    Assemble Brief
+On form submission  ODER  Called by Monitor (Sub-Workflow-Trigger)
+                    |
+            Build Search Query
+            /                \
+   Tavily Search          Feed List
+        |                     |
+Normalize Tavily         Fetch Feeds
+        |                     |
+        |                 Parse XML
+        |                     |
+        |          Normalize Feed Items
+        |                     |
+        |          Fetch Article Pages (Volltext)
+        |                     |
+        |          Extract Article Text
+        \                    /
+         Combine Sources (append)
+                    |
+         Triage Relevance (Haiku 4.5)
+                    |
+         Clean and Rank Sources
+                    |
+         Extract Metadata (Haiku 4.5 + Structured Output Parser)
+                    |
+         Analyse and Draft Brief (Sonnet 5)
+                    |
+            Assemble Brief
+                    |
+       Prepare DB Record (Hash + Qualitaetsschwelle)
+                    |
+       Insert Brief -> Insert Sources -> Return Result
 ```
 
-13 Nodes, 3 Modellaufrufe, 2 Quellenkanaele, 4 Filterstufen.
-Kosten ca. $0.05 pro Brief.
+### Workflow 2: Daily Payments Monitor
+Schedule (alle 2 Tage, 08:00) -> Watchlist (5 Themen) -> Loop -> Sub-Workflow -> Pause 5 s
+done-Ausgang -> Run Summary
+
+### Workflow 3: Weekly Payments Report
+Schedule (Montag 08:00) -> Fetch Week Data (SQL, 7 Tage) -> Group by Category
+-> Synthesise Report (Sonnet 4.6) -> Build HTML -> Save Report -> Send via Resend
+
+### Frontend
+Next.js (App Router, JS statt TS, Tailwind) auf Vercel, liest Supabase per anon/publishable Key.
+Seiten: Feed (/), Brief-Detail (/brief/[id]), Companies, Reports, About.
 
 ---
 
-## 2026-08-25 — Phase 1 abgeschlossen
+## Phase 1 — Erster Brief (25.08.)
 
-Workflow: Form -> Build Search Query -> Tavily -> Clean and Rank -> Claude Sonnet 5 -> Assemble Brief
+- Tavily search_depth basic (1 Credit), max_results 8, Content auf 1200 Zeichen
+- Quellen-Tiering 1-4, Ranking ueberschreibt bewusst den Tavily-Score
+- Tests: "Adyen" OK, "Agentic Payments" OK, "Zyloric Payments Consortium" (erfunden)
+  -> INSUFFICIENT EVIDENCE. Das Modell hatte 8 plausible Payments-Quellen vor sich
+  und schrieb: "None can be repurposed to support claims about the requested topic."
 
-- 6 Nodes, ca. $0.04 pro Brief
-- Tavily: search_depth basic (1 Credit), max_results 8, Content auf 1200 Zeichen gekuerzt
-- Quellen-Tiering: 1 = Regulierer, 2 = Unternehmen, 3 = serioese Medien, 4 = unbekannt
-- Ranking ueberschreibt bewusst den Tavily-Score: Quellenqualitaet vor Suchrelevanz
-
-### Tests
-- Test 1 "Adyen": 8 Quellen, alle Abschnitte, durchgehend zitiert -> OK
-- Test 2 "Agentic Payments": erkannte zwei konkurrierende Infrastrukturmodelle
-  (kartennetzvermittelt vs. blockchain/stablecoin-nativ) -> OK
-- Test 3 "Zyloric Payments Consortium" (erfunden): INSUFFICIENT EVIDENCE -> OK
-  Wichtigster Test. Das Modell hatte 8 plausibel wirkende Payments-Quellen vor sich
-  und haette daraus etwas zusammenbauen koennen. Stattdessen:
-  "None can be repurposed to support claims about the requested topic."
-
-### Gefundene Bugs
-- `new URL()` ist in der n8n-Code-Sandbox nicht verfuegbar
-  -> Domain per Regex extrahieren: `/^https?:\/\/([^\/?#:]+)/i`
-- Max Tokens 3000 zu knapp, Brief brach mitten im Satz ab -> auf 4000 erhoeht
-- TIER_3-Liste zu schmal, Forbes und Payments-Fachpresse fielen auf Tier 4 -> erweitert
+### Bugs
+- new URL() ist in der n8n-Code-Sandbox nicht verfuegbar -> Regex
+- Max Tokens 3000 zu knapp, Brief brach mitten im Satz ab -> 4000
+- TIER_3 zu schmal, Forbes und Fachpresse fielen auf Tier 4
 
 ---
 
-## 2026-08-25 — Phase 2 abgeschlossen
+## Phase 2 — Quellenqualitaet (25.08.)
 
 ### Boilerplate-Filter, zwei Stufen
 1. Phrasenmuster (registered office, copyright resides, ...)
-2. Satzdichte: >40 Woerter UND >60 Woerter pro Satz = Navigationsliste, kein Fliesstext
-
-Anlass: Die Stripe-Newsroom-Seite lieferte ein reines Navigationsmenue
-("Solutions Enterprises Startups Agentic commerce Crypto Ecommerce ...") ohne
-eine einzige der typischen Boilerplate-Phrasen. Nur der Strukturtest erkennt das.
+2. Satzdichte: >40 Woerter UND >60 Woerter/Satz = Navigationsliste
+Anlass: Stripe-Newsroom lieferte reines Navigationsmenue ohne typische Phrasen.
 
 ### RSS-Zweig
-- ECB Press + ECB Blog (verifiziert auf ecb.europa.eu/home/html/rss.en.html)
-- Feed List (Code) -> HTTP Request -> XML -> Normalize (Keyword-Vorfilter)
-- HTTP Request laeuft automatisch einmal pro Item aus der Feed-Liste
-- Response Format muss auf "Text" stehen, sonst versucht n8n XML als JSON zu lesen
-- Merge-Node im Modus "append" fuehrt Tavily + RSS zusammen
+ECB Press + Blog (verifiziert). Response Format muss "Text" sein, sonst
+versucht n8n XML als JSON zu lesen. Merge im Modus "append".
 
 ### Themenfilter fuer RSS
-RSS liefert ALLES, was ein Feed publiziert. Filter prueft, ob ein Themenwort
-in Titel oder Text vorkommt.
--> "Adyen" verwirft EZB-Meldungen korrekt, "digital euro" behaelt sie
-
-### Headline-Only-Problem
-Der ECB-Feed liefert kein description-Feld, nur Titel/Link/Datum.
-Loesung: Kennzeichnung [HEADLINE ONLY] im Evidenzblock + Prompt-Regel 8:
-Das Modell darf ueber die Ueberschrift hinaus nichts behaupten.
-Funktioniert — der Brief schreibt seitdem selbst dazu:
-"per a headline-only release" / "content not retrieved beyond the headline".
-
-### Ergebnis
-Erstmals tier1_count > 0: Test "digital euro" mit 2 EZB-Primaerquellen.
+"Adyen" verwirft EZB-Meldungen korrekt, "digital euro" behaelt sie.
 
 ---
 
-## 2026-08-25 — Phase 3 abgeschlossen (strukturierte Ausgabe)
+## Phase 3 — Strukturierte Ausgabe (25.08.)
 
-Zweiter LLM-Zweig extrahiert parallel zum Fliesstext-Brief ein JSON-Objekt.
-
-- Modellwahl bewusst getrennt:
-  Sonnet 5 fuer die Analyse (Reasoning ueber mehrere Quellen)
-  Haiku 4.5 fuer die Extraktion (simple Aufgabe, halber Preis)
-- Structured Output Parser mit "Generate From JSON Example"
-- Festes Vokabular fuer category und relevance-Felder, sonst erfindet das Modell
-  bei jedem Lauf neue Kategorien ("regulation" / "regulatory" / "reg")
-  -> in einer Datenbank unbrauchbar
-
-### Scoring
-- impact_score 0-100 mit definierten Stufen
-- confidence_score 0-100, gedeckelt:
-  Headline-Only-Quellen -> max 60
-  weniger als 3 Quellen -> max 40
+Zweiter LLM-Zweig, Haiku statt Sonnet (halber Preis fuer simple Extraktion).
+Structured Output Parser, festes Vokabular fuer category und relevance-Felder —
+sonst erfindet das Modell bei jedem Lauf neue Kategorien.
 
 ### Architektur-Lernpunkt: Reihenfolge in n8n
+Parallele Zweige in Assemble Brief -> Node lief zweimal.
+"Execute Once" loest das NICHT (begrenzt Items, nicht Ausfuehrungen).
+Verbindung getrennt -> ExpressionError "Node hasn't been executed".
 
-Erster Versuch: zwei parallele Zweige aus Clean and Rank Sources,
-beide muenden in Assemble Brief.
+Regel: $json = vorheriger Node. $('X') = beliebiger Node, der VORHER lief.
+Die Verkabelung bestimmt die Ausfuehrungsreihenfolge.
 
-Problem 1: Assemble Brief lief zweimal (einmal pro eingehender Verbindung).
-  "Execute Once" loest das NICHT — das begrenzt Items pro Ausfuehrung,
-  nicht die Anzahl der Ausfuehrungen.
-
-Problem 2: Verbindung getrennt und stattdessen $('Extract Metadata') verwendet
-  -> ExpressionError "Node hasn't been executed".
-  $('Node Name') funktioniert nur fuer Nodes, die VORHER in der Kette liefen.
-  Die Verkabelung bestimmt die Ausfuehrungsreihenfolge, nicht nur den Datenfluss.
-
-Loesung: Nodes in Reihe statt parallel.
-Analyse-Prompt greift seitdem explizit ueber
-`$('Clean and Rank Sources').first().json.evidence` zu, nicht ueber $json.
-
-Regel fuer kuenftige Workflows:
-  $json  = Ausgabe des unmittelbar vorhergehenden Nodes
-  $('X') = Ausgabe eines beliebigen Nodes, der vorher gelaufen ist
-Bei verzweigten Workflows immer die zweite Variante.
-
-### Qualitaetsbefund: Extraktion ist zu grosszuegig
-Test "digital euro" lieferte in primary_companies:
-European Central Bank, PagBrasil, Marqeta, Banking Circle, Highnote, Nuvei, Nium.
-Nur die EZB gehoert dort hin.
-
-Ursache: Sonnet ignoriert irrelevante Quellen und zitiert sie nicht.
-Haiku bei reiner Extraktion tut das nicht — es extrahiert alles, was dasteht.
-
+### Extraktion ist zu grosszuegig
+primary_companies enthielt 7 Firmen, davon 6 aus themenfremden Quellen.
+Sonnet ignoriert irrelevante Quellen, Haiku bei reiner Extraktion nicht.
 Muster: Extraktionsmodelle sind zu grosszuegig, Analysemodelle zu wortreich.
-Beide brauchen enge Anweisungen, aber unterschiedliche.
-
-Fix: primary_companies nur zentrale Akteure der im TOPIC beschriebenen
-Entwicklung, keine beilaeufig erwaehnten Firmen, lieber 1-5 Eintraege.
-Analog fuer affected_segments: nur Segmente mit konkretem Effekt.
-
-Relevanz: In Phase 7 wuerde ein Klick auf "Marqeta" sonst einen
-Digital-Euro-Artikel zeigen, in dem Marqeta nicht vorkommt.
 
 ---
 
-## 2026-08-25 — Sicherheitsbefund: extremistische Inhalte in der Evidenz
+## Sicherheitsbefund: extremistische Inhalte (25.08.)
 
-Test "digital euro" lieferte instagram.com als [S9]. Der Tavily-Snippet enthielt
-neben dem eigentlichen Post auch Nutzerkommentare mit antisemitischer Codierung
-(dreifache Klammern um Firmennamen, "Trust us goyim").
+instagram.com als Quelle, Tavily-Snippet enthielt Nutzerkommentare mit
+antisemitischer Codierung.
 
-Ursache: instagram.com fehlte in excludeDomains, und es gab keine zweite Ebene.
-
-Fix, zweistufig:
-1. excludeDomains erweitert (alle grossen Social-Plattformen + Syndikationsportale
-   aol.com, msn.com, die Agenturmeldungen unveraendert uebernehmen)
-2. Harte NEVER_USE-Sperre im eigenen Code
-
+Fix zweistufig: excludeDomains erweitert + harte NEVER_USE-Sperre im eigenen Code.
 Prinzip: Suchmaschinen-Parameter sind Wuensche, keine Garantien.
-Eine Sperre im eigenen Code kann niemand umgehen. Defence in depth.
 
-Merke: Aggregator-Snippets enthalten Kommentarspalten. Bei jeder Quelle,
-die nutzergenerierte Inhalte fuehrt, ist der Snippet unkontrollierbar.
+Merke: Aggregator-Snippets enthalten Kommentarspalten.
 
 ---
 
-## 2026-08-25 — Triage-Schritt (Haiku) eingefuehrt
+## Triage-Schritt (25.08.)
 
-Problem: Regelbasierte Filter erkennen Format, aber nicht Themenbezug.
-coredo.eu war ein sauber geschriebener Marketingtext ueber Internet Acquiring —
-strukturell einwandfrei, inhaltlich am Thema vorbei. Kein Regex erkennt das.
+Regelbasierte Filter erkennen Format, nicht Themenbezug. coredo.eu war ein
+sauber geschriebener Marketingtext — strukturell einwandfrei, thematisch daneben.
 
-Zwischenversuch mit URL-Mustern ging schief: `/news` in der Sperrliste traf
-auch legitime Artikel-URLs, sourceCount fiel von 9 auf 2.
--> URL-Struktur sagt nichts ueber Themenrelevanz aus.
+Zwischenversuch mit URL-Mustern ging schief: /news traf legitime Artikel-URLs,
+sourceCount fiel von 9 auf 2. URL-Struktur sagt nichts ueber Relevanz.
 
-Loesung: Basic LLM Chain mit Haiku 4.5 zwischen Merge und Aufbereitung.
-Bewertet jede Quelle 0-100 auf Themenbezug.
-
-Wichtig: "Execute Once" noetig, sonst laeuft der Node einmal pro Item
-(10 Aufrufe statt 1). Der Prompt sammelt ueber $input.all() selbst alle Quellen.
-
-Ergebnis Test "digital euro": 11 Quellen -> 8 aussortiert, 3-4 relevante uebrig.
-droppedCount der Formatfilter faellt auf 0 — der Muell ist vorher schon weg.
-
-Beispiel-Scores:
-  90 = EZB digital euro app
-  85 = centralbanking.com Gesetzgebung
-  75 = Yahoo digitaler Euro
-  25 = EZB Bargeldmeldung ("tangentially related")
-  5-15 = Marketingtexte und Index-Seiten
-
-Schwelle zuerst auf 40, dann auf 25 gesenkt, damit tangential relevante
-Tier-1-Quellen als Kontext erhalten bleiben.
+Loesung: Haiku bewertet jede Quelle 0-100. Schwelle 25.
+"Execute Once" noetig, sonst 10 Aufrufe statt 1.
 
 Erkenntnis: Regeln fuer Format und Duplikate, Modell fuer Inhalt.
 
-### Retry On Fail
-Nach Einfuehrung des dritten Anthropic-Aufrufs trat ein Connection Error auf.
-Alle API-Nodes (3x Anthropic, 1x Tavily) auf Retry On Fail gesetzt:
-Max Tries 3, Wait Between Tries 2000 ms.
-Im naechsten Lauf schlug ein Aufruf fehl und lief im zweiten Versuch durch —
-der Workflow brach nicht ab.
+---
+
+## Phase 2.4 — Volltext-Extraktion RSS (25.08.)
+
+EZB-Feeds liefern nur Ueberschriften -> confidence lag bei 48.
+HTTP Request pro Link + Extraktion:
+- mainRegion() isoliert article/main/body (ECB-Seiten: 60 KB Navigation vorher)
+- keepProse() behaelt nur Zeilen mit >60 Zeichen, Satzzeichen,
+  <60 % Grossbuchstaben-Woerter
+- Unter 200 Zeichen -> ehrlich auf Headline-Only zurueckfallen
+
+Ergebnis: confidence 48 -> 72, impact 72 -> 78. Der Brief zitiert seitdem
+konkrete Zahlen (92 % Bargeldakzeptanz, Mobile 36 % -> 68 %).
 
 ---
 
-## 2026-08-25 — Beobachtung: Triage senkt die Confidence, und das ist richtig
+## Phase 4 — Datenbank (26.08.)
 
-Vor Triage: 10 Quellen, davon 2 Headline-Only (20 %) -> confidence 55
-Nach Triage:  4 Quellen, davon 2 Headline-Only (50 %) -> confidence 48
+### Supabase statt Google Sheets
+Sheets braucht Google-Cloud-Projekt + OAuth (~20 Schritte), Supabase nur
+Registrierung. Migration waere ohnehin noetig (Website liest Postgres).
+Echtes SQL erlaubt Dedup per UNIQUE-Constraint.
 
-Das Aussortieren von Rauschen erhoeht den ANTEIL duenner Quellen.
-Das Modell rechnet korrekt damit:
-"Two of four sources provide headline-only content with no article body;
-the two substantive sources are lower-tier and describe draft legislation."
+### Konfiguration
+- Region Frankfurt (DSGVO)
+- "Automatically expose new tables" AUS, "automatic RLS" EIN
+- Session Pooler, Port 5432, SSL Require
+- Ignore SSL Issues EIN noetig (self-signed Intermediate am Pooler).
+  TLS bleibt aktiv, nur Kettenpruefung entfaellt.
+- Max Connections 100 -> 5
 
-Vier relevante Quellen sind besser als zehn gemischte, aber die Faktenbasis
-ist schmaler, wenn die Haelfte davon nur Ueberschriften sind.
+### Dedup-Hash
+Thema + sortierte kanonische Quellen-URLs, NICHT der Brieftext.
+Der LLM-Text unterscheidet sich bei jedem Lauf minimal.
+.sort() noetig, weil Suchmaschinen keine stabile Reihenfolge liefern.
 
--> Naechste echte Baustelle ist Volltext-Extraktion fuer RSS-Links,
-   nicht weitere Filterung.
+### Bug: on conflict do nothing liefert keine ID
+Insert Brief gab nur {"success": true}, Insert Sources schrieb null in not-null.
+Fix: on conflict do update set topic = excluded.topic
+     returning id, ..., (xmax = 0) as was_inserted
+
+### SQL-Injection
+Alle Writes parametrisiert ($1, $2, ...). Wert getrennt vom Befehl uebertragen.
 
 ---
 
-## Kosten (Stand 25.08.2026)
+## Phase 5 — Scheduler (26.08.)
 
-- Anthropic: ca. $0.20 verbraucht, Guthaben $5, Monatslimit $5
-- Tavily: unter 15 von 1500 Credits
-- Zwei unabhaengige Schutzschichten: Guthaben (physische Grenze) und
-  Monatslimit (greift auch bei Auto-Reload)
-- Auto-Reload bewusst NICHT aktiviert
+### Sub-Workflow statt Nachbau
+Bestehender Workflow bekam zweiten Trigger. Ein Ort fuer die Logik.
+Execute Sub-workflow auf "Run once for each item" — sonst landen alle
+Themen in EINEM Aufruf und Build Search Query nimmt nur $input.first().
+
+### Fehlertoleranz
+On Error: Continue am Sub-Workflow-Node. Bei 5 Themen = 15 API-Aufrufe.
+Scheitert Thema 3, wuerde "Stop Workflow" auch 4 und 5 verhindern.
+
+### Kalibrierungsfehler
+Erst MIN_SOURCES = 3 UND MIN_CONFIDENCE = 35.
+Stripe verworfen mit "2 Quellen, confidence 55" — Confidence lag ueber der
+Grenze, es scheiterte an der Quellenzahl. Zwei gute Quellen sind mehr wert
+als fuenf schwache.
+Fix: MIN_CONFIDENCE = 40, HARD_MIN_SOURCES = 2.
+Der Confidence-Score enthaelt die Quellenzahl bereits.
+
+### Zeitfenster
+'week' ergab bei Einzelunternehmen 1 Quelle und Briefs ueber Stellenanzeigen.
+Auf 'month' umgestellt — Duplikate faengt der Hash ab.
+
+### Referenzlauf 26.08., 5 Themen
+5 verarbeitet, 4 neu, 1 zu schwach, 13 Quellen.
+[78/72] digital euro, [68/55] agentic payments, [62/55] Visa, [35/45] Adyen.
+Ranking sortiert korrekt.
+
+### Betrieb
+Alle 2 Tage 08:00. Docker startet mit Windows, Container --restart unless-stopped.
+Ausgefallene Laeufe werden NICHT nachgeholt (unkritisch, Zeitfenster ueberlappt).
+n8n verlangt, dass der Unterworkflow published ist.
+
+---
+
+## Phase 6 — Wochenreport (26.08.)
+
+### Synthese statt Aneinanderreihung
+Der Prompt ist als Redaktionsauftrag formuliert: clustern, ausschliessen,
+ranken, Themen verbinden. Ergebnis bei 11 Datenbankeintraegen:
+
+- D1+D2 (digital euro) und D3+D6 (Stripe/OpenRouter) korrekt als dieselbe
+  Story erkannt und zusammengefuehrt
+- D9, D10, D11 ausgeschlossen: Firmenprofil, Marktanteilsbeschreibung,
+  Stellenanzeige — keine Entwicklungen
+- D8 ausgeschlossen: Einzelquelle, confidence 25
+
+Das Modell erzeugte dabei eine eigenstaendige These, die in keiner Quelle stand:
+"OpenRouter's core function — optimising API calls across dozens of AI providers
+— is structurally similar to payment routing. Stripe acquiring it is not a
+diversification; it is a bet that these two routing problems will be solved by
+the same platform."
+
+Und blieb ehrlich: "Readers should treat the Stripe-PayPal discussion as a
+market rumour requiring verification before acting on it."
+
+### Coverage Note
+Der Report legt selbst offen, was zusammengefuehrt und was verworfen wurde.
+Das ist der Abschnitt, der Vertrauen schafft.
+
+### Bekanntes Problem: Dedup auf Story-Ebene fehlt
+Der Hash dedupliziert auf Quellenebene. Zwei Laeufe mit unterschiedlichen
+Tavily-Treffern zur selben Nachricht erzeugen zwei Eintraege.
+Der Synthese-Schritt faengt das ab, die Datenbank enthaelt aber Dubletten.
+
+### Versand
+Resend statt Gmail (3 Min statt 15 Min Einrichtung, 3.000 Mails/Monat frei).
+Ohne verifizierte Domain nur von onboarding@resend.dev und nur an die
+Registrierungsadresse.
+Credential auf api.resend.com beschraenkt.
+
+---
+
+## Phase 7 — Website (26.08.)
+
+### Stack
+Next.js App Router, Tailwind, Vercel. Bewusst kein TypeScript-Code
+(create-next-app hat TS installiert, wir schreiben .js — TS haelt still).
+
+### Supabase-Zugriff
+Publishable Key (nicht anon/legacy, nicht service_role).
+Zwei Ebenen noetig:
+- GRANT SELECT: darf der Nutzer die Tabelle anfassen?
+- RLS Policy: welche Zeilen darf er sehen?
+Beides muss erfuellt sein. Wir hatten nur die Policy -> "permission denied
+for table briefs". Ursache: "Automatically expose new tables" war bewusst
+ausgeschaltet, deshalb fehlte das GRANT.
+
+### Seiten
+- Feed: Kennzahlen + Karten, Impact farbcodiert, Confidence als Balken
+- Brief-Detail: vollstaendiger Brief + Quellenliste mit Tier, origin,
+  "headline only"-Markierung, klickbare Links zur Primaerquelle
+- Companies: gruppiert nach Firma, sortiert nach Haeufigkeit
+- About: Methodik in 6 Schritten, Erklaerung der Scores, Limitationen
+
+Der About-Abschnitt nennt explizit, was das System NICHT kann.
+Das ist der Teil, der ein Portfolio-Projekt glaubwuerdig macht.
+
+### Haeufige Fehlerquelle
+Kopieren aus dem Chat verliert bei langen className-Zeilen ganze Zeilen
+(z.B. das oeffnende <a). VS Code + Copy-Button statt manuellem Markieren.
+
+### Git und Deployment
+- create-next-app legt in web/ ein eigenes Git-Repo an -> "embedded git
+  repository". Ohne git rm --cached -f web + Loeschen von web/.git waere
+  auf GitHub nur ein leerer Ordner gelandet.
+- GitHub-Passwort-Auth existiert nicht mehr, Browser-Login ueber
+  credential.helper manager (die Fehlerseite im Browser ist irrefuehrend,
+  der Push laeuft trotzdem)
+- Commit-Autor haengt an der git config user.email, nicht am Login
+- Vercel: Root Directory MUSS auf web stehen, sonst "No Next.js version detected"
+- Environment Variables muessen bei Vercel separat hinterlegt werden,
+  .env.local wird nicht mit hochgeladen (Absicht)
+
+### Kontrolle vor dem Push
+git status durchgehen und pruefen, ob .env, node_modules oder Keys dabei sind.
+In VS Code sind ignorierte Dateien GRAU dargestellt — visuelle Kontrolle.
+Nach dem Push: Repo-Suche nach sk-ant, tvly-, sb_secret -> null Treffer.
+
+---
+
+## Phase 9 — Repo und Dokumentation (26.–27.08.)
+
+- Erster Commit nach GitHub (privat): Workflows, Frontend, .gitignore, progress.txt.
+- Neu angelegt: README.md (Problem, Evidenzmodell, Designentscheidungen, Grenzen),
+  docs/architecture.md (Mermaid: System, drei Workflows, Datenmodell, Frontend-Zugriff),
+  db/schema.sql, db/metrics.sql, .gitattributes (eol=lf), web/.env.local.example.
+- Aufraeum-Durchgang: veraltetes Sample entfernt (zitierte instagram.com, eine
+  inzwischen per NEVER_USE gesperrte Quelle). ERD an db/schema.sql angeglichen
+  (created_at bei brief_sources, sent_at bei weekly_reports). Modell-IDs in der Doku
+  korrigiert: die Wochen-Synthese laeuft auf claude-sonnet-4-6, nicht Sonnet 5;
+  neue Tabelle "Models in use" in architecture.md mit den echten IDs pro Node.
+- web/AGENTS.md und web/CLAUDE.md (von `next dev` erzeugt) aus der Versionierung
+  genommen und ignoriert. Dauerhafte Projektregeln stehen jetzt in CLAUDE.md (Root).
+- Keine Workflow-Logik und keine Modell-IDs in den n8n-Exporten geaendert.
+
+Offen in Phase 9: Diff-Review durch Julian, dann ein sauberer Commit;
+Entscheidung ueber Repo-Public.
+
+---
+
+## Kosten (Stand 26.08.2026)
+
+- Anthropic: ca. $1.50 verbraucht, Guthaben $5, Monatslimit $5, Warnung bei $3
+- Tavily: unter 60 von 1500 Credits
+- Supabase, Vercel, Resend: Free Tier
+- Erwarteter Dauerbetrieb: ~$4/Monat
+
+Auto-Reload bei Anthropic bewusst NICHT aktiviert.
 
 ---
 
 ## Offene Punkte
 
-1. Volltext-Extraktion fuer RSS-Links (hoechste Prioritaet)
-   Die beiden autoritativsten Quellen liegen nur als Ueberschrift vor.
-2. Weitere Feeds: EBA, EU-Kommission, Unternehmens-Newsrooms
-3. droppedCount zaehlt bei Tavily nicht ganz korrekt (kosmetisch)
-4. Tavily "Pay as you go" steht auf AN — vor Phase 5 abschalten,
-   damit ein fehlerhafter Scheduler nicht unbegrenzt abrechnet
+1. Story-Level-Dedup fehlt (Datenbank enthaelt inhaltliche Dubletten)
+2. Tavily "Pay as you go" steht auf AN — vor Volumensteigerung abschalten
+3. Watchlist liegt im Code, ab ~20 Themen nach Supabase umziehen
+4. Weitere Feeds: EBA, EU-Kommission, Unternehmens-Newsrooms
+5. Form-Trigger hat Authentication: None — vor oeffentlichem n8n-Hosting absichern
+6. Repo ist privat — oeffentlich schalten erst nach Review des README-Stands
+7. Weekly Report laeuft auf claude-sonnet-4-6, On-Demand Brief auf claude-sonnet-5
+   — bewusst angleichen, wenn ein Modellwechsel getestet wird
+8. /reports und /companies zeigen bei DB-Fehler nur eine rote Textzeile statt der
+   roten Fehlerbox von app/page.js — bei naechster Frontend-Aenderung angleichen
 
 ---
 
 ## Naechste Phasen
 
-- Phase 2.4: Volltext-Extraktion RSS
-- Phase 4: Speicherung (Google Sheets, spaeter Supabase), Dedup ueber content_hash
-- Phase 5: Scheduler, taegliches Monitoring einer Watchlist
-- Phase 6: Wochenreport als HTML/E-Mail/PDF
-- Phase 7: Oeffentliche Website (Next.js auf Vercel)
 - Phase 8: Merchant Payment Performance Analyzer (synthetische Daten)
-- Phase 9: GitHub public, README, Architekturdiagramm
+- Phase 9: Repo oeffentlich schalten (Doku steht, siehe Abschnitt oben;
+  offen: Diff-Review und Entscheidung)
 - Phase 10: Nutzer und ehrliche Metriken
+
+### Metrik-Abfragen
+Alle belegbaren Kennzahlen und ihre Queries stehen in db/metrics.sql.
+Jede Zahl im README oder Portfolio muss aus einer dieser Queries reproduzierbar sein.
