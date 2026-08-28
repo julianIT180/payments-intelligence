@@ -14,6 +14,17 @@
 --   Descriptive columns (headline, summary, category, event_type, *_relevance)
 --   may be null: the extractor is allowed to return null when the evidence did
 --   not support a field. Scores are always present and bounded 0-100.
+--
+--   The publication policy is ALSO enforced at the database level, independently
+--   of the workflow: a CHECK constraint (briefs_publishable_ck, below) rejects
+--   rows that are not publishable, and the anon RLS policy only exposes
+--   publishable briefs. A brief is "publishable" when:
+--     confidence_score is not null and confidence_score >= 40
+--     source_count is not null and source_count >= 3
+--     brief_markdown does not carry the "INSUFFICIENT EVIDENCE" refusal marker
+--       within its first 500 characters
+--   (Five pre-gate rows from 2026-08-26 predate this; clean them up before
+--   adding the CHECK — that one-off cleanup is handled separately.)
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.briefs (
@@ -70,6 +81,19 @@ create index if not exists idx_briefs_impact
   on public.briefs using btree (impact_score desc);
 create index if not exists idx_briefs_category
   on public.briefs using btree (category);
+
+-- Publication policy at the database level. Drop-then-add keeps this re-runnable.
+-- Adding this will fail if non-publishable rows still exist — run the one-off
+-- cleanup of pre-gate briefs first.
+alter table public.briefs drop constraint if exists briefs_publishable_ck;
+alter table public.briefs
+  add constraint briefs_publishable_ck check (
+    confidence_score is not null
+    and confidence_score >= 40
+    and source_count is not null
+    and source_count >= 3
+    and left(coalesce(brief_markdown, ''), 500) not like '%INSUFFICIENT EVIDENCE%'
+  );
 
 -- ---------------------------------------------------------------------------
 -- brief_sources
@@ -155,13 +179,31 @@ grant select on public.briefs         to anon;
 grant select on public.brief_sources  to anon;
 grant select on public.weekly_reports to anon;
 
+-- anon sees only publishable briefs (same predicate as briefs_publishable_ck).
 drop policy if exists "public read briefs" on public.briefs;
 create policy "public read briefs"
-  on public.briefs for select to anon using (true);
+  on public.briefs for select to anon using (
+    confidence_score is not null
+    and confidence_score >= 40
+    and source_count is not null
+    and source_count >= 3
+    and left(coalesce(brief_markdown, ''), 500) not like '%INSUFFICIENT EVIDENCE%'
+  );
 
+-- anon sees a source row only when its parent brief is publishable.
 drop policy if exists "public read sources" on public.brief_sources;
 create policy "public read sources"
-  on public.brief_sources for select to anon using (true);
+  on public.brief_sources for select to anon using (
+    exists (
+      select 1 from public.briefs b
+      where b.id = brief_sources.brief_id
+        and b.confidence_score is not null
+        and b.confidence_score >= 40
+        and b.source_count is not null
+        and b.source_count >= 3
+        and left(coalesce(b.brief_markdown, ''), 500) not like '%INSUFFICIENT EVIDENCE%'
+    )
+  );
 
 drop policy if exists "public read reports" on public.weekly_reports;
 create policy "public read reports"

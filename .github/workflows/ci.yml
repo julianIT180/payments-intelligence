@@ -44,6 +44,9 @@ jobs:
       - name: Evaluation harness (static, no external APIs)
         run: node evaluation/validate.mjs
 
+      - name: Publication-policy guards (Weekly Report SQL + schema)
+        run: node evaluation/policy-guards.mjs
+
       - name: Secret pattern scan (tracked files)
         run: |
           set -euo pipefail

@@ -15,7 +15,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "select\n  id,\n  created_at,\n  topic,\n  headline,\n  summary,\n  category,\n  event_type,\n  impact_score,\n  confidence_score,\n  strategic_relevance,\n  regulatory_relevance,\n  primary_companies,\n  affected_segments,\n  topics,\n  geography,\n  key_dates,\n  what_to_monitor,\n  source_count,\n  tier1_count,\n  (\n    select string_agg(bs.domain || ' | ' || coalesce(bs.url, ''), E'\\n')\n    from brief_sources bs\n    where bs.brief_id = briefs.id\n  ) as source_list\nfrom briefs\nwhere created_at >= now() - interval '7 days'\norder by impact_score desc nulls last, created_at desc\nlimit 25;",
+        "query": "select\n  id,\n  created_at,\n  topic,\n  headline,\n  summary,\n  category,\n  event_type,\n  impact_score,\n  confidence_score,\n  strategic_relevance,\n  regulatory_relevance,\n  primary_companies,\n  affected_segments,\n  topics,\n  geography,\n  key_dates,\n  what_to_monitor,\n  source_count,\n  tier1_count,\n  (\n    select string_agg(bs.domain || ' | ' || coalesce(bs.url, ''), E'\\n')\n    from brief_sources bs\n    where bs.brief_id = briefs.id\n  ) as source_list\nfrom briefs\nwhere created_at >= now() - interval '7 days'\n  and confidence_score is not null\n  and confidence_score >= 40\n  and source_count is not null\n  and source_count >= 3\n  and brief_markdown is not null\n  and left(brief_markdown, 500) not like '%INSUFFICIENT EVIDENCE%'\n  and (\n    select count(*) from brief_sources bsx\n    where bsx.brief_id = briefs.id\n  ) >= 3\norder by impact_score desc nulls last, created_at desc\nlimit 25;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",

@@ -16,6 +16,7 @@ evaluation/
   cases/       <id>.json           case definition: input, objective, expected assertions
   fixtures/    <id>.result.json    recorded result of one run (you fill these in)
   validate.mjs                     compares fixtures to cases, prints PASS/FAIL/INCOMPLETE
+  policy-guards.mjs                static regression guard for the publication policy
 ```
 
 ## Running
@@ -23,7 +24,21 @@ evaluation/
 ```bash
 node evaluation/validate.mjs            # lenient: unfilled fields report INCOMPLETE, do not fail
 node evaluation/validate.mjs --strict   # INCOMPLETE also fails — use once fixtures are complete
+node evaluation/policy-guards.mjs       # publication-policy regression guard (used by CI)
 ```
+
+### policy-guards.mjs
+
+Fails if the read-side / schema-side defenses against non-publishable briefs are
+weakened. It inspects the tracked source files (no database) and checks that:
+
+- the Weekly Report `Fetch Week Data` SQL keeps `confidence_score >= 40`,
+  `source_count >= 3`, excludes the leading `INSUFFICIENT EVIDENCE` marker, and
+  verifies at least three **actual** `brief_sources` child rows (not just the stored
+  `source_count`);
+- `db/schema.sql` keeps the `briefs_publishable_ck` CHECK constraint;
+- the anon RLS policies for `briefs` and `brief_sources` are not `using (true)` and
+  scope to publishable briefs only.
 
 Exit code is non-zero if any assertion **FAILs**. Fields that were not recorded for a
 run are reported as **NOT CAPTURED** and do not fail (add `--strict` to make them fail
